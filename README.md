@@ -14,6 +14,26 @@ veyra/
 后端负责能力：多模型接入（OpenAI 兼容 / 本地 Ollama）、知识库 RAG、工具调用、多智能体协作、
 会话与用量落库。两边通过 HTTP + SSE 通信。
 
+## 本地模式（不需要 Supabase）
+
+chatbot-ui 原本依赖 Supabase 做认证与存储。不配 Supabase 也能用：
+
+```powershell
+cd backend  && .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000   # 先起后端
+cd frontend && npm run dev                                                       # 再起前端
+```
+
+打开 <http://localhost:3000/local>，直接提问即可。这一页：
+
+- 不需要登录，会话存在浏览器本地（localStorage）
+- 模型可选「Veyra 智能体（带工具）」或「Veyra 蜂群（多智能体）」
+- 回答结束后附上知识库来源清单
+
+![本地模式](docs/local-mode.png)
+
+其他页面（工作区、文件、助手等）仍然需要 Supabase，缺配置时会在真正用到的那一刻给出提示，
+而不是整页白屏。
+
 ## 快速开始
 
 ### 1. 后端（先起，前端要连它）

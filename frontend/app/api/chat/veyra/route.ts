@@ -98,7 +98,9 @@ function toTextStream(
         }
 
         if (sources.length) {
-          controller.enqueue(encoder.encode(`\n\n来源：${sources.join("、")}`))
+          // 用 Markdown 列表收尾：前端直接用 Markdown 组件渲染，来源就是一份可读的清单
+          const list = sources.map((item) => `- ${item}`).join("\n")
+          controller.enqueue(encoder.encode(`\n\n**来源**\n\n${list}\n`))
         }
         close()
       } catch (error) {
