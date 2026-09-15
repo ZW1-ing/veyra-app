@@ -7,6 +7,10 @@ export type LLMID =
   | MistralLLMID
   | GroqLLMID
   | PerplexityLLMID
+  | VeyraLLMID
+
+// Veyra 服务（自建 Python 后端）
+export type VeyraLLMID = "veyra-agent" | "veyra-swarm"
 
 // OpenAI Models (UPDATED 5/13/24)
 export type OpenAILLMID =
