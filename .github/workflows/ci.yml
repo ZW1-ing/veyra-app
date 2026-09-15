@@ -48,6 +48,9 @@ jobs:
         run: ruff check app tests scripts
       - name: 单元测试（pytest）
         run: pytest -q
+      - name: 检索评估（回归门禁，离线 hash 嵌入）
+        # 用离线嵌入跑同一套标注数据：改动检索逻辑导致召回下降或误召回上升就会红
+        run: python scripts/evaluate_retrieval.py --embedding hash --min-recall 0.85 --max-false-positive 0.6
       - name: 应用数据库迁移
         run: alembic upgrade head
       - name: 校验模型与迁移一致
@@ -77,3 +80,15 @@ jobs:
         run: npm run type-check
       - name: lint
         run: npm run lint
+      - name: 单元测试
+        run: npm test
+
+  docker:
+    name: 容器镜像构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: 校验 compose 配置
+        run: docker compose -f backend/docker-compose.yml config
+      - name: 构建后端镜像
+        run: docker build -t veyra-backend:ci backend

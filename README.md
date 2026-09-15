@@ -71,6 +71,7 @@ Agent 编排。数据、密钥与对话记录都留在本机，不依赖任何�
 | 知识库 RAG | 分块入库、混合检索（TF-IDF + 向量）、回答带 `[S1]` 来源编号 | `backend/app/kb/` |
 | 助手与提示词 | 角色设定与可复用指令模板，选中后作为系统提示词下发 | `frontend/app/local/assistants/` |
 | 会话与用量 | 会话、消息、token 用量落 MySQL，Alembic 管理迁移 | `backend/app/db/` |
+| 用量统计 | 按模型与日期聚合 token 用量并可视化 | `backend/app/api/routes/usage.py` |
 | 接口安全 | API Key 鉴权 + 按 key 的滑动窗口限流 | `backend/app/api/deps.py` |
 
 ## 系统架构
@@ -183,6 +184,7 @@ npm run dev
 | GET | `/kb/documents` | 文档列表（含分块大小与嵌入模型） |
 | DELETE | `/kb/documents/{id}` | 删除文档及其分块 |
 | POST | `/kb/search` | 知识库检索，返回带编号与分数的片段 |
+| GET | `/usage` | 用量统计（按模型与日期聚合） |
 
 `POST /chat` 支持的关键参数：
 
@@ -257,19 +259,27 @@ Leader 输出 JSON 计划后要过三道关：id 唯一、依赖存在、不能�
 ## 测试与 CI
 
 ```powershell
-# 后端：48 项，离线可跑（SQLite + mock 模型）
+# 后端：51 项，离线可跑（SQLite + mock 模型）
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\ruff.exe check app tests scripts
 .\.venv\Scripts\python.exe -m alembic check
 
+# 检索质量门禁：召回下降或误召回上升会以非零码退出
+.\.venv\Scripts\python.exe scripts\evaluate_retrieval.py --embedding hash --min-recall 0.85
+
 # 前端：类型检查、lint、7 项单测
 cd frontend
-npm run type-check && npm run lint && npm test
+npm run type-check && npm run lint && npm test && npm run build
 ```
 
-CI（`.github/workflows/ci.yml`）在每次推送时跑两个 job：后端会**真起一个 MySQL 8.4 服务容器**
-验证迁移（SQLite 测不出 MySQL 特有的坑），前端跑类型检查与 lint。
+CI（`.github/workflows/ci.yml`）在每次推送时跑三个 job：
+
+| Job | 内容 |
+| --- | --- |
+| 后端 | ruff + pytest + **检索评估回归门禁** + 在真实 MySQL 8.4 容器上跑迁移与一致性校验 |
+| 前端 | 类型检查 + lint + 单测 |
+| 容器 | 校验 compose 配置并**真构建镜像** |
 
 ## Roadmap
 

@@ -1,6 +1,5 @@
 "use client"
 
-import { MessageMarkdown } from "@/components/messages/message-markdown"
 import {
   loadAssistants,
   type Assistant,
@@ -19,6 +18,7 @@ import {
   type LocalSession
 } from "@/lib/local-chat/store"
 import { IconDownload, IconPencil, IconPlus, IconTrash, IconX } from "@tabler/icons-react"
+import dynamic from "next/dynamic"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 /**
@@ -32,6 +32,20 @@ const MODELS = [
   { id: "veyra-agent", label: "Veyra 智能体（带工具）" },
   { id: "veyra-swarm", label: "Veyra 蜂群（多智能体）" }
 ]
+
+/**
+ * Markdown 渲染器按需加载。
+ *
+ * react-markdown + 语法高亮加起来有几百 KB，直接静态引入会把它们塞进首屏包；
+ * 对话页首屏其实只有输入框和空状态，等真有回答要渲染时再拉这个 chunk。
+ */
+const MessageMarkdown = dynamic(
+  () => import("@/components/messages/message-markdown").then((mod) => mod.MessageMarkdown),
+  {
+    ssr: false,
+    loading: () => <span className="text-muted-foreground">…</span>
+  }
+)
 
 export default function LocalChatPage() {
   const [state, setState] = useState<LocalChatState>({ sessions: [], activeId: null })
