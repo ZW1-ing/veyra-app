@@ -1,67 +1,135 @@
+<div align="center">
+
 # Veyra
 
-一个 AI 应用的全栈实现：**前端用 chatbot-ui，后端用 Python**。
+**本地优先的 AI 应用全栈实现**
+
+Next.js 前端 · FastAPI + LangGraph 后端 · 知识库检索 · 多智能体协作
+
+<br />
+
+[![CI](https://github.com/xiaopeng-126/veyra-app/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaopeng-126/veyra-app/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?logo=fastapi&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-1.2-1C3C3C)
+![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-9-4479A1?logo=mysql&logoColor=white)
+
+<br />
+
+[概览](#概览) · [界面](#界面) · [架构](#系统架构) · [快速开始](#快速开始) · [接口](#接口一览) · [设计取舍](#关键设计取舍) · [测试](#测试与-ci)
+
+</div>
+
+---
+
+## 概览
+
+Veyra 是一个可以完全跑在自己电脑上的 AI 应用：前端是聊天界面，后端负责模型调用、知识库检索与
+Agent 编排。数据、密钥与对话记录都留在本机，不依赖任何第三方后端服务。
+
+它解决的是「把 RAG 与 Agent 真正落地」时会遇到的那几个具体问题：
+检索命中率怎么量化、换嵌入模型怎么不静默变差、模型卡住怎么办、上下文超长怎么裁、
+多智能体怎么调度而不失控。每个问题在下面都有对应的实现与测试。
+
+<table>
+  <tr>
+    <td width="25%" align="center"><strong>本地优先</strong><br /><sub>对话、知识库、密钥都在本机</sub></td>
+    <td width="25%" align="center"><strong>模型无锁定</strong><br /><sub>Ollama / DeepSeek / 任意兼容服务</sub></td>
+    <td width="25%" align="center"><strong>Agent 原生</strong><br /><sub>工具调用循环与多智能体调度</sub></td>
+    <td width="25%" align="center"><strong>可追溯</strong><br /><sub>回答带来源编号，用量可查</sub></td>
+  </tr>
+</table>
+
+## 界面
+
+<table>
+  <tr>
+    <td width="33.33%">
+      <img src="docs/local-mode.png" alt="会话" width="100%" />
+      <p align="center"><sub>会话：多会话、流式回答、来源引用</sub></p>
+    </td>
+    <td width="33.33%">
+      <img src="docs/knowledge-base.png" alt="知识库" width="100%" />
+      <p align="center"><sub>知识库：入库、分块信息、检索调试</sub></p>
+    </td>
+    <td width="33.33%">
+      <img src="docs/assistants.png" alt="助手" width="100%" />
+      <p align="center"><sub>助手与提示词：角色设定 + 默认模型</sub></p>
+    </td>
+  </tr>
+</table>
+
+## 核心能力
+
+| 模块 | 能力 | 实现位置 |
+| --- | --- | --- |
+| 跨模型对话 | SSE 流式输出、会话内切换模型、缺密钥自动降级到离线 mock | `backend/app/llm/` |
+| Agent 工具调用 | 模型自主决定调用工具，循环有步数上限与整体超时 | `backend/app/agent/graph.py` |
+| 多智能体协作 | Leader 规划 → 依赖感知并发调度 → 汇总，成员失败不影响其他成员 | `backend/app/agent/swarm.py` |
+| 知识库 RAG | 分块入库、混合检索（TF-IDF + 向量）、回答带 `[S1]` 来源编号 | `backend/app/kb/` |
+| 助手与提示词 | 角色设定与可复用指令模板，选中后作为系统提示词下发 | `frontend/app/local/assistants/` |
+| 会话与用量 | 会话、消息、token 用量落 MySQL，Alembic 管理迁移 | `backend/app/db/` |
+| 接口安全 | API Key 鉴权 + 按 key 的滑动窗口限流 | `backend/app/api/deps.py` |
+
+## 系统架构
+
+```mermaid
+flowchart LR
+  subgraph Browser["浏览器"]
+    UI["Next.js 页面<br/>会话 · 知识库 · 助手 · 设置"]
+  end
+
+  subgraph NextSide["Next.js 服务端（frontend/）"]
+    Proxy["代理路由<br/>/api/chat/veyra · /api/veyra/*"]
+  end
+
+  subgraph Backend["Python 后端（backend/）"]
+    Router["FastAPI 路由"]
+    Agent["LangGraph<br/>单智能体 / 多智能体"]
+    KB["混合检索<br/>TF-IDF + 向量"]
+    Store[("MySQL<br/>会话 · 文档 · 分块")]
+  end
+
+  LLM["本机 Ollama<br/>或任意 OpenAI 兼容服务"]
+
+  UI -->|"HTTP + SSE"| Proxy
+  Proxy -->|"HTTP + SSE"| Router
+  Router --> Agent
+  Router --> KB
+  Agent --> LLM
+  KB --> Store
+  Router --> Store
+```
+
+### 目录结构
 
 ```
 veyra/
-├── frontend/   Next.js 聊天界面（基于开源项目 chatbot-ui 改造）
-└── backend/    FastAPI + LangGraph + MySQL：模型接入、知识库检索、Agent 编排
+├── frontend/                     Next.js 14（App Router）
+│   ├── app/
+│   │   ├── local/                本地模式四页：会话 / 助手 / 知识库 / 设置
+│   │   └── api/                  代理到 Python 后端的路由
+│   └── lib/
+│       ├── local-chat/           会话、助手、设置的本地存储
+│       └── veyra-backend.ts      后端地址解析（仅允许本机地址）
+└── backend/                      FastAPI + LangGraph
+    ├── app/
+    │   ├── api/routes/           health / sessions / kb / chat
+    │   ├── agent/                LangGraph 图、工具注册表、多智能体编排
+    │   ├── kb/                   分块、向量化、混合检索
+    │   ├── llm/                  模型抽象（mock / OpenAI 兼容）
+    │   └── db/                   SQLAlchemy 模型与会话工厂
+    ├── migrations/               Alembic 迁移
+    └── scripts/                  冒烟脚本、检索评估、阈值校准
 ```
-
-## 这是什么
-
-前端负责界面：会话列表、消息流式渲染、Markdown、模型切换。
-后端负责能力：多模型接入（OpenAI 兼容 / 本地 Ollama）、知识库 RAG、工具调用、多智能体协作、
-会话与用量落库。两边通过 HTTP + SSE 通信。
-
-## 本地模式（不需要 Supabase）
-
-chatbot-ui 原本依赖 Supabase 做认证与存储。不配 Supabase 也能用：
-
-```powershell
-cd backend  && .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000   # 先起后端
-cd frontend && npm run dev                                                       # 再起前端
-```
-
-打开 <http://localhost:3000/local>，直接提问即可。这一页：
-
-- 不需要登录，会话存在浏览器本地（localStorage）
-- 左侧是多会话列表：新建、重命名、删除，会话可导出为 Markdown
-- 模型可选「Veyra 智能体（带工具）」或「Veyra 蜂群（多智能体）」
-- 回答结束后附上知识库来源清单
-
-首页在检测不到 Supabase 配置时会直接引导进本地模式。
-
-![本地模式](docs/local-mode.png)
-
-本地模式自带三个页面（左侧窄导航切换）：
-
-| 页面 | 内容 |
-| --- | --- |
-| `/local` | 会话：多会话、流式回答、来源引用、导出 Markdown |
-| `/local/assistants` | 助手与提示词：角色设定 + 默认模型、可复用指令模板 |
-| `/local/kb` | 知识库：上传 txt/markdown、查看分块与嵌入模型、删除、检索调试 |
-| `/local/settings` | 设置：后端地址、API Key、新会话默认模式、测试连接 |
-
-![知识库管理](docs/knowledge-base.png)
-
-知识库页里的「检索调试」值得一试：输入一个问题就能看到会命中哪些片段、各自得分多少。
-它是排查「为什么回答没引用到我的文档」最快的方式——先看检索有没有命中，
-再看模型怎么用这些片段；两者分开调，比盯着回答猜有效得多。
-
-助手页里可以定义角色（例如「严谨技术评审」「面试官模拟」「调研小组」），
-每个助手带一段角色设定与默认模型档位；在会话顶部选中后，这段设定会作为
-`system_prompt` 发给后端，由后端拼进系统提示词（见 `backend/app/agent/prompts.py`）。
-下面的提示词模板可以一键追加到输入框，用来复用常用指令。
-
-![助手与提示词](docs/assistants.png)
-
-其他页面（工作区、文件、助手等）仍然需要 Supabase，缺配置时会在真正用到的那一刻给出提示，
-而不是整页白屏。
 
 ## 快速开始
 
-### 1. 后端（先起，前端要连它）
+前端与后端各自独立，先起后端再起前端。
+
+### 后端
 
 ```powershell
 cd backend
@@ -72,14 +140,13 @@ python -m venv .venv
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS veyra CHARACTER SET utf8mb4;"
 copy .env.example .env
 
-# 应用数据库迁移并启动
 .\.venv\Scripts\python.exe -m alembic upgrade head
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-打开 <http://127.0.0.1:8000/docs> 可以直接调接口。
+打开 <http://127.0.0.1:8000/docs> 可以直接调接口。默认使用离线 mock 模型，**不需要任何密钥**就能跑通。
 
-默认用离线 mock 模型，不需要任何密钥就能跑通。接本机 Ollama 的真实模型与中文嵌入：
+接本机 Ollama 的真实模型与中文嵌入：
 
 ```env
 LLM_PROVIDER=openai_compat
@@ -90,65 +157,135 @@ EMBEDDING_MODEL=bge-m3
 EMBEDDING_DIM=1024
 ```
 
-部署到服务器时记得配上 `API_KEYS`：留空等于不校验，任何人能连上端口就能用。
+> 部署到服务器时记得配置 `API_KEYS`：留空等于不校验，任何能连上端口的人都能用。
 
-### 2. 前端
+### 前端
 
 ```powershell
 cd frontend
 npm install
-copy .env.local.example .env.local   # 至少填 VEYRA_API_URL；用 Supabase 的功能需要另外配
+copy .env.local.example .env.local
 npm run dev
 ```
 
-打开 <http://localhost:3000>。
+打开 <http://localhost:3000/local> 直接提问，不需要登录，也不会向外部服务发送任何数据。
 
-模型列表里的 **Veyra 智能体** / **Veyra 蜂群** 这两档就是走本仓库的 Python 后端：
-前端把请求发给 `/api/chat/veyra`，该路由再转发给后端的 `/chat/stream`，
-并把后端的 SSE 事件翻译成前端能直接显示的文本流（末尾附上 `[S1]` 来源）。
+## 接口一览
 
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/health` | 健康检查（含数据库探活，不需要鉴权） |
+| POST | `/chat` | 对话，一次性返回 |
+| POST | `/chat/stream` | 对话，SSE 流式返回 |
+| POST | `/sessions` | 建立会话 |
+| GET | `/sessions/{id}/messages` | 会话消息列表 |
+| POST | `/kb/documents` | 文档入库（自动分块 + 向量化，幂等） |
+| GET | `/kb/documents` | 文档列表（含分块大小与嵌入模型） |
+| DELETE | `/kb/documents/{id}` | 删除文档及其分块 |
+| POST | `/kb/search` | 知识库检索，返回带编号与分数的片段 |
+
+`POST /chat` 支持的关键参数：
+
+```json
+{
+  "message": "一次任务里最多能同时跑几个小助手？",
+  "mode": "single",
+  "use_knowledge": true,
+  "system_prompt": "你是严谨的技术评审，区分结论与推测",
+  "max_steps": 8
+}
 ```
-浏览器 → frontend/app/api/chat/veyra/route.ts → backend POST /chat/stream
-                                                    ├─ 知识库混合检索（MySQL）
-                                                    ├─ 单智能体工具循环 / 多智能体协作
-                                                    └─ SSE 流式返回
-```
 
-两个细节值得留意：
+## 关键设计取舍
 
-- 该路由用 **Node runtime**，不是 edge —— 后端跑在本机 `127.0.0.1`，edge runtime 连不上宿主机。
-- 前端会话会映射成后端会话 id（取首条消息 id 的 sha256 前 32 位）：后端会话 id 列是 32 位，
-  而前端消息 id 是 36 位 uuid，直接传会被 MySQL 拒绝；用首条消息做种子是为了让同一个会话每轮都落到同一个后端会话，历史才能接上。
+这些是写这个项目时真正花时间做判断的地方，也是面试里最容易被追问的点。
 
-后端没启动时，接口会返回明确提示（告诉你去 `backend/` 里起服务），而不是一句「服务器错误」。
+### 检索：混合打分 + 用实测校准的阈值
 
-## 测试
+只用向量检索，遇到专有名词和短查询容易跑偏；只用关键词，同义改写就召不回。所以两个都算再加权求和，
+并用「词法覆盖率 **或** 向量相似度」作为放行条件——这两道门槛必须是**或**的关系，
+否则「对话记录存在哪里」这种和原文用词完全不同的问法会被纯词法门槛挡掉。
+
+阈值不靠拍脑袋：`scripts/evaluate_retrieval.py --sweep` 会在带标注的数据集上跑 100+ 种组合，
+把召回、MRR、误召回一起打出来。实测对比：
+
+| 嵌入方式 | recall@3 | MRR | 误召回率 |
+| --- | --- | --- | --- |
+| hash（无语义，离线基线） | 87.5% | 0.750 | 50% |
+| bge-m3（真实语义） | **100%** | **1.000** | **0%** |
+
+在 hash 基线那一列，我把所有阈值组合都扫了一遍，**没有任何一组**能同时做到高召回和零误召回——
+这说明瓶颈在嵌入本身，继续调阈值只是在两个糟糕的选项里挑一个。
+
+### 分块比阈值更值得先查
+
+同样是实测发现的问题：一篇 146 字、讲了三个主题的文档，如果被切成**一整块**，
+工具调用、并发限制、数据库三件事会被平均进同一个向量，相关片段聊胜于无、无关片段也没被拉开。
+按 80 字切成三块之后，**同一套阈值**下三个相关问题全部命中，无关问题依然被拒绝。
+
+所以调优顺序是：先看分块有没有把主题混在一起 → 再看嵌入模型有没有语义 → 最后才动阈值。
+
+### 换嵌入模型不能静默变差
+
+向量维度对不上时，余弦相似度会直接返回 0——不报错、不警告，日志里什么都看不到。
+所以 `documents` 表记录了入库时的 `embedding_model` / `embedding_dim` / `chunk_size`，
+检索时发现维度不一致就跳过这些分块并打出警告。**换嵌入模型 = 重建索引**，这是基本纪律。
+
+### 异步接口里的同步数据库调用
+
+FastAPI 的 `async def` 路由跑在事件循环里，而 SQLAlchemy 同步驱动是阻塞的。
+在 `async def` 里直接 `db.execute(...)`，会把整个事件循环卡住——单机自测完全看不出来。
+所以知识库读写与对话落库都走 `run_in_threadpool`，并有测试用 0.3 秒假慢查询 + 心跳协程验证。
+
+### 模型卡住与上下文超长
+
+单轮对话有整体超时，超时**不是**返回 500，而是保留已生成的部分并说明情况——
+用户至少知道自己看的是半截答案。上下文裁剪按 token 预算而不是按条数：三条长文档和三十条短消息
+的 token 量差着数量级，按条数裁一样会把上下文撑爆；裁剪时无论如何保留最新一条。
+
+### 多智能体：模型给的计划不能直接信
+
+Leader 输出 JSON 计划后要过三道关：id 唯一、依赖存在、不能成环，成员数有上限；
+解析失败就降级成单任务，绝不让坏计划把整轮对话带崩。执行阶段用信号量限制并发、每个成员有超时，
+某个成员失败时依赖它的下游标记为跳过，其余照常汇总。
+
+### 代理只允许连本机后端
+
+前端通过 Next 的服务端路由转发请求，避免跨域并隐藏密钥。后端地址可以从设置页配置，
+但**只接受 127.0.0.1 / localhost**——否则这个代理就成了一个 SSRF 跳板，任何网站都能借它探测内网。
+
+## 测试与 CI
 
 ```powershell
-# 后端
+# 后端：48 项，离线可跑（SQLite + mock 模型）
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q      # 45 项，离线可跑
+.\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\ruff.exe check app tests scripts
-.\.venv\Scripts\python.exe -m alembic check   # 模型与迁移是否一致
+.\.venv\Scripts\python.exe -m alembic check
 
-# 前端
+# 前端：类型检查、lint、7 项单测
 cd frontend
-npm run type-check
-npm run lint
+npm run type-check && npm run lint && npm test
 ```
 
-CI（`.github/workflows/ci.yml`）会在每次推送时跑这些检查：后端会真起一个 MySQL 服务容器来验证迁移，
-前端跑类型检查与 lint。
+CI（`.github/workflows/ci.yml`）在每次推送时跑两个 job：后端会**真起一个 MySQL 8.4 服务容器**
+验证迁移（SQLite 测不出 MySQL 特有的坑），前端跑类型检查与 lint。
 
-## 目录说明
+## Roadmap
 
-| 路径 | 内容 |
-| --- | --- |
-| `backend/app/api/` | FastAPI 路由：health / sessions / kb / chat |
-| `backend/app/agent/` | LangGraph 编排：单智能体工具循环、多智能体协作 |
-| `backend/app/kb/` | 分块、向量化、混合检索 |
-| `backend/app/llm/` | 模型抽象（mock / OpenAI 兼容） |
-| `backend/migrations/` | Alembic 迁移 |
-| `frontend/app/` | Next.js 页面与 API 路由 |
-| `frontend/components/` | 聊天界面组件 |
-| `frontend/lib/` | 前端工具与数据访问 |
+- [x] 跨模型流式对话与会话管理
+- [x] 知识库：分块、混合检索、来源引用、幂等入库
+- [x] Agent 工具调用循环与多智能体协作
+- [x] 助手、提示词模板与参数设置
+- [x] 鉴权、限流、迁移与 CI
+- [ ] PDF / DOCX 文档解析
+- [ ] 向量索引（pgvector / hnswlib，替代当前的全量余弦计算）
+- [ ] 原生 function calling（当前走 JSON 协议以兼容更多模型）
+- [ ] 多实例部署：把进程内限流换成 Redis 实现
+
+## 许可
+
+本项目采用 MIT 许可（见 [LICENSE](LICENSE)）。
+
+前端界面基于开源项目 [chatbot-ui](https://github.com/mckaywrigley/chatbot-ui) 改造，
+其原有 MIT 许可与版权声明保留在 `frontend/license`。
