@@ -15,6 +15,8 @@ test.describe("用量", () => {
 
     await expect(page.getByText("估算费用").first()).toBeVisible()
     await expect(page.getByText(/\$\d/).first()).toBeVisible()
+    await expect(page.getByText("今日额度")).toBeVisible()
+    await expect(page.getByText("每日 token")).toBeVisible()
     await expect(page.getByText("未配置")).toBeHidden()
   })
 })

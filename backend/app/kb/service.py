@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import Settings
+from ..core.metrics import RETRIEVAL_DURATION, RETRIEVAL_HITS
 from ..db.models import ChunkRow, DocumentRow
 from .chunking import chunk_text
 from .embedding import EmbeddingProvider
@@ -175,6 +176,8 @@ async def search_knowledge(
     started = time.perf_counter()
     candidates = await run_in_threadpool(_load_candidates, db, owner_id)
     if not candidates:
+        RETRIEVAL_DURATION.observe(time.perf_counter() - started)
+        RETRIEVAL_HITS.observe(0)
         return []
 
     query_vector = (await embedding.embed([query]))[0]
@@ -187,6 +190,8 @@ async def search_knowledge(
             len(query_vector),
         )
         if not candidates:
+            RETRIEVAL_DURATION.observe(time.perf_counter() - started)
+            RETRIEVAL_HITS.observe(0)
             return []
 
     ranked = rank_chunks(
@@ -200,12 +205,15 @@ async def search_knowledge(
         min_coverage=settings.retrieval_min_coverage,
         min_vector_similarity=settings.retrieval_min_vector_similarity,
     )
+    duration = time.perf_counter() - started
+    RETRIEVAL_DURATION.observe(duration)
+    RETRIEVAL_HITS.observe(len(ranked))
     logger.info(
         "retrieval_completed candidates=%d skipped=%d hits=%d duration_ms=%.1f",
         len(candidates),
         skipped,
         len(ranked),
-        (time.perf_counter() - started) * 1000,
+        duration * 1000,
     )
 
     return [

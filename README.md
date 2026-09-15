@@ -97,7 +97,8 @@ Agent 编排。数据、密钥与对话记录都留在本机，不依赖任何�
 | 会话与用量 | 会话、消息、token 与成本快照落 MySQL，Alembic 管理迁移 | `backend/app/db/` |
 | 用量统计 | 按模型与日期聚合 token、调用次数与估算费用 | `backend/app/api/routes/usage.py` |
 | 租户隔离 | 每个 API Key 映射独立租户，会话、知识库、用量互不可见 | `backend/app/api/deps.py` |
-| 请求追踪 | 每个请求生成或透传 `X-Request-ID`，记录耗时并关联用量 | `backend/app/core/observability.py` |
+| 租户预算 | 每日 token、费用与模型级 token 额度，超额返回 `429 + Retry-After` | `backend/app/services/quota.py` |
+| 请求追踪 | `X-Request-ID`、耗时日志，以及 Prometheus `/metrics` | `backend/app/core/observability.py` |
 
 ## 系统架构
 
@@ -190,7 +191,10 @@ EMBEDDING_DIM=1024
 >
 > ```env
 > MODEL_PRICES={"qwen2.5":{"prompt_per_million":0.2,"completion_per_million":0.6}}
+> TENANT_QUOTAS={"你的密钥":{"daily_tokens":200000,"daily_cost":5,"model_tokens":{"qwen2.5":100000}}}
 > ```
+>
+> 指标端点是 `/metrics`，沿用同一套 API Key 鉴权，Prometheus 抓取时在请求头带 `X-API-Key` 即可。
 
 ### 前端
 
@@ -323,7 +327,7 @@ Leader 输出 JSON 计划后要过三道关：id 唯一、依赖存在、不能�
 ## 测试与 CI
 
 ```powershell
-# 后端：72 项，离线可跑（SQLite + mock 模型）
+# 后端：77 项，离线可跑（SQLite + mock 模型）
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\ruff.exe check app tests scripts
@@ -360,6 +364,7 @@ CI（`.github/workflows/ci.yml`）在每次推送时跑三个 job：
 - [x] 原生 function calling（自动在原生协议与 JSON 兜底之间切换）
 - [x] 多实例部署的 Redis 限流（配 `REDIS_URL` 即启用）
 - [x] 请求级追踪与模型成本快照
+- [x] 租户日预算、模型额度与 Prometheus 指标
 - [ ] 向量索引：实测全量余弦在 1000 块以内够用、5000 块约 0.9 秒，等规模上来再引入 ANN
 
 ## 许可

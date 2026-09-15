@@ -11,6 +11,8 @@ from contextvars import ContextVar
 
 from fastapi import Request, Response
 
+from .metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
+
 logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -53,12 +55,17 @@ async def request_context_middleware(
         )
         raise
     finally:
+        elapsed = time.perf_counter() - started
+        route = getattr(request.scope.get("route"), "path", None) or "unmatched"
+        status = response.status_code if response is not None else 500
+        HTTP_REQUESTS.labels(request.method, route, str(status)).inc()
+        HTTP_REQUEST_DURATION.labels(request.method, route).observe(elapsed)
         if request.url.path != "/health":
             logger.info(
                 "request_completed method=%s path=%s status=%s duration_ms=%.1f",
                 request.method,
                 request.url.path,
-                response.status_code if response is not None else 500,
-                (time.perf_counter() - started) * 1000,
+                status,
+                elapsed * 1000,
             )
         _request_id.reset(token)

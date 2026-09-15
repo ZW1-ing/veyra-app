@@ -16,6 +16,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ...agent.tools import build_default_registry
 from ...core.config import Settings
+from ...core.metrics import (
+    CHAT_COST,
+    CHAT_DURATION,
+    CHAT_FIRST_TOKEN,
+    CHAT_REQUESTS,
+    CHAT_TOKENS,
+    QUOTA_REJECTIONS,
+)
 from ...core.observability import current_request_id
 from ...db.session import get_session_factory
 from ...kb.embedding import EmbeddingProvider
@@ -25,6 +33,7 @@ from ...schemas.chat import ChatRequest, ChatResponse
 from ...schemas.kb import SourceOut
 from ...services import chat as chat_service
 from ...services.dialogue import stream_dialogue
+from ...services.quota import check_quota
 from ..deps import (
     Principal,
     embedding_dep,
@@ -114,6 +123,23 @@ async def chat_stream(
     principal: Principal = Depends(enforce_rate_limit),
 ) -> StreamingResponse:
     # 数据库是同步驱动，放进线程池执行，别卡住事件循环
+    quota = await run_in_threadpool(
+        check_quota,
+        db,
+        quota_key=principal.key,
+        owner_id=principal.owner_id,
+        model=provider.model,
+        settings=settings,
+    )
+    if not quota.allowed:
+        QUOTA_REJECTIONS.labels(quota.scope).inc()
+        CHAT_REQUESTS.labels(payload.mode or "single", provider.model, "quota_rejected").inc()
+        raise HTTPException(
+            status_code=429,
+            detail=quota.detail,
+            headers={"Retry-After": str(quota.retry_after)},
+        )
+
     session = await run_in_threadpool(
         _prepare, db, payload, embedding, settings, principal.owner_id
     )
@@ -205,6 +231,18 @@ async def chat_stream(
                         (time.perf_counter() - started) * 1000,
                         cost,
                     )
+                    duration = time.perf_counter() - started
+                    CHAT_REQUESTS.labels(mode, provider.model, "success").inc()
+                    CHAT_DURATION.labels(mode, provider.model).observe(duration)
+                    if first_token_ms is not None:
+                        CHAT_FIRST_TOKEN.labels(mode, provider.model).observe(
+                            first_token_ms / 1000
+                        )
+                    CHAT_TOKENS.labels(provider.model, "prompt").inc(usage.prompt_tokens)
+                    CHAT_TOKENS.labels(provider.model, "completion").inc(
+                        usage.completion_tokens
+                    )
+                    CHAT_COST.labels(provider.model).inc(cost)
                     yield _sse(
                         {
                             "type": "final",
@@ -223,6 +261,10 @@ async def chat_stream(
                         }
                     )
         except Exception as exc:  # noqa: BLE001 流已开始，只能把错误当事件吐出
+            CHAT_REQUESTS.labels(mode, provider.model, "error").inc()
+            CHAT_DURATION.labels(mode, provider.model).observe(
+                time.perf_counter() - started
+            )
             logger.exception(
                 "chat_stream_failed mode=%s model=%s duration_ms=%.1f",
                 mode,
@@ -250,6 +292,23 @@ async def chat_once(
     principal: Principal = Depends(enforce_rate_limit),
 ) -> ChatResponse:
     started = time.perf_counter()
+    quota = await run_in_threadpool(
+        check_quota,
+        db,
+        quota_key=principal.key,
+        owner_id=principal.owner_id,
+        model=provider.model,
+        settings=settings,
+    )
+    if not quota.allowed:
+        QUOTA_REJECTIONS.labels(quota.scope).inc()
+        CHAT_REQUESTS.labels(payload.mode or "single", provider.model, "quota_rejected").inc()
+        raise HTTPException(
+            status_code=429,
+            detail=quota.detail,
+            headers={"Retry-After": str(quota.retry_after)},
+        )
+
     session = await run_in_threadpool(
         _prepare, db, payload, embedding, settings, principal.owner_id
     )
@@ -326,6 +385,11 @@ async def chat_once(
         (time.perf_counter() - started) * 1000,
         cost,
     )
+    CHAT_REQUESTS.labels(mode, provider.model, "success").inc()
+    CHAT_DURATION.labels(mode, provider.model).observe(time.perf_counter() - started)
+    CHAT_TOKENS.labels(provider.model, "prompt").inc(usage.prompt_tokens)
+    CHAT_TOKENS.labels(provider.model, "completion").inc(usage.completion_tokens)
+    CHAT_COST.labels(provider.model).inc(cost)
 
     return ChatResponse(
         session_id=session.id,

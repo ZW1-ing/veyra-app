@@ -63,7 +63,9 @@ export default defineConfig({
         AGENT_MAX_STEPS: "3",
         RATE_LIMIT_PER_MINUTE: "0",
         MODEL_PRICES:
-          '{"mock-assistant":{"prompt_per_million":1,"completion_per_million":2}}'
+          '{"mock-assistant":{"prompt_per_million":1,"completion_per_million":2}}',
+        TENANT_QUOTAS:
+          '{"anonymous":{"daily_tokens":100000,"daily_cost":1,"model_tokens":{"mock-assistant":50000}}}'
       }
     },
     {

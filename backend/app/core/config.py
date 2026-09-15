@@ -1,8 +1,9 @@
 """集中配置：所有可调项都走环境变量，代码里不写死。"""
 
+import json
 from functools import lru_cache
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,11 +14,21 @@ class ModelPrice(BaseModel):
     completion_per_million: float = Field(default=0.0, ge=0)
 
 
+class TenantQuota(BaseModel):
+    """租户的每日额度；0 表示不限制。"""
+
+    daily_tokens: int = Field(default=0, ge=0)
+    daily_cost: float = Field(default=0.0, ge=0)
+    model_tokens: dict[str, int] = Field(default_factory=dict)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # 复杂字段由下面的 validator 解析，空环境变量才能统一视为“未配置”
+        enable_decoding=False,
     )
 
     app_name: str = "Veyra Agent API"
@@ -50,6 +61,13 @@ class Settings(BaseSettings):
     # MODEL_PRICES={"qwen2.5":{"prompt_per_million":0.2,"completion_per_million":0.6}}
     # 未配置的模型按 0 计费；本地 Ollama 保持不填即可。
     model_prices: dict[str, ModelPrice] = Field(default_factory=dict)
+    # 可选：按 API Key 配置每日额度。key 使用原始 API Key，数据库仍只保存哈希。
+    # TENANT_QUOTAS={"key-a":{"daily_tokens":200000,"daily_cost":5,
+    #                          "model_tokens":{"qwen2.5":100000}}}
+    tenant_quotas: dict[str, TenantQuota] = Field(default_factory=dict)
+    default_tenant_quota: TenantQuota = Field(default_factory=TenantQuota)
+    # 每日额度按这个时区的自然日重置
+    quota_timezone: str = "Asia/Shanghai"
 
     # 向量化
     embedding_provider: str = "hash"  # hash | openai_compat
@@ -88,6 +106,20 @@ class Settings(BaseSettings):
     @property
     def pricing_configured(self) -> bool:
         return bool(self.model_prices)
+
+    @field_validator("model_prices", "tenant_quotas", mode="before")
+    @classmethod
+    def empty_mapping_from_env(cls, value):
+        if value in (None, ""):
+            return {}
+        return json.loads(value) if isinstance(value, str) else value
+
+    @field_validator("default_tenant_quota", mode="before")
+    @classmethod
+    def empty_quota_from_env(cls, value):
+        if value in (None, ""):
+            return {}
+        return json.loads(value) if isinstance(value, str) else value
 
 
 @lru_cache

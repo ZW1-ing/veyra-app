@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.routes import chat, health, kb, sessions, usage
+from .api.routes import chat, health, kb, metrics, sessions, usage
 from .core.config import get_settings
 from .core.logging import setup_logging
 from .core.observability import request_context_middleware
@@ -47,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(kb.router)
     app.include_router(chat.router)
     app.include_router(usage.router)
+    app.include_router(metrics.router)
     return app
 
 

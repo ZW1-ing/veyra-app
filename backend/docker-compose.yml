@@ -32,6 +32,9 @@ services:
       API_KEYS: ${API_KEYS:-}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
       REDIS_URL: ${REDIS_URL:-}
+      TENANT_QUOTAS: ${TENANT_QUOTAS:-}
+      DEFAULT_TENANT_QUOTA: ${DEFAULT_TENANT_QUOTA:-}
+      QUOTA_TIMEZONE: ${QUOTA_TIMEZONE:-Asia/Shanghai}
       LLM_PROVIDER: ${LLM_PROVIDER:-mock}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}

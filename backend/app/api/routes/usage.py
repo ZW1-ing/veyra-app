@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from ...core.config import Settings
 from ...db.models import UsageRow
 from ...schemas.usage import UsageBucket, UsageSummary
+from ...services.quota import quota_status
 from ..deps import Principal, enforce_rate_limit, get_db, settings_dep
 
 router = APIRouter(prefix="/usage", tags=["usage"], dependencies=[Depends(enforce_rate_limit)])
@@ -95,4 +96,10 @@ def usage_summary(
         days=days,
         by_day=[_bucket(*row) for row in day_rows],
         by_model=[_bucket(*row) for row in model_rows],
+        quota=quota_status(
+            db,
+            quota_key=principal.key,
+            owner_id=principal.owner_id,
+            settings=settings,
+        ),
     )

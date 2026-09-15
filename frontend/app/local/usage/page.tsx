@@ -1,6 +1,7 @@
 "use client"
 
 import { backendRequestHeaders, loadSettings } from "@/lib/local-chat/settings"
+import { Progress } from "@/components/ui/progress"
 import { IconRefresh } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
 
@@ -30,6 +31,26 @@ interface UsageSummary {
   pricing_configured: boolean
   by_day: UsageBucket[]
   by_model: UsageBucket[]
+  quota: QuotaStatus
+}
+
+interface ModelTokenQuota {
+  model: string
+  token_limit: number
+  token_used: number
+  token_remaining: number
+}
+
+interface QuotaStatus {
+  timezone: string
+  resets_at: string
+  daily_tokens_limit: number | null
+  daily_tokens_used: number
+  daily_tokens_remaining: number | null
+  daily_cost_limit: number | null
+  daily_cost_used: number
+  daily_cost_remaining: number | null
+  model_token_limits: ModelTokenQuota[]
 }
 
 function formatNumber(value: number): string {
@@ -43,6 +64,10 @@ function formatCost(value: number): string {
     minimumFractionDigits: value < 0.01 ? 4 : 2,
     maximumFractionDigits: 4
   }).format(value)
+}
+
+function quotaPercent(used: number, limit: number): number {
+  return Math.min(100, Math.max(0, (used / limit) * 100))
 }
 
 export default function UsagePage() {
@@ -142,6 +167,78 @@ export default function UsagePage() {
                   还没有记录。去会话页问一句，这里就会有数据。
                 </p>
               )}
+
+              {/* 今日额度 */}
+              <section className="flex flex-col gap-3">
+                <div className="flex items-end justify-between gap-3">
+                  <h2 className="text-sm font-semibold">今日额度</h2>
+                  <span className="text-muted-foreground text-xs">
+                    {data.quota.timezone} · {new Date(data.quota.resets_at).toLocaleString("zh-CN")} 重置
+                  </span>
+                </div>
+                {data.quota.daily_tokens_limit === null &&
+                data.quota.daily_cost_limit === null &&
+                data.quota.model_token_limits.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">未配置租户预算或模型额度。</p>
+                ) : (
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {data.quota.daily_tokens_limit !== null && (
+                      <div className="rounded-md border p-3">
+                        <div className="flex items-center justify-between text-sm">
+                          <span>每日 token</span>
+                          <span className="tabular-nums">
+                            {formatNumber(data.quota.daily_tokens_used)} /{" "}
+                            {formatNumber(data.quota.daily_tokens_limit)}
+                          </span>
+                        </div>
+                        <Progress
+                          className="mt-3 h-2"
+                          value={quotaPercent(
+                            data.quota.daily_tokens_used,
+                            data.quota.daily_tokens_limit
+                          )}
+                        />
+                      </div>
+                    )}
+
+                    {data.quota.daily_cost_limit !== null && (
+                      <div className="rounded-md border p-3">
+                        <div className="flex items-center justify-between text-sm">
+                          <span>每日费用</span>
+                          <span className="tabular-nums">
+                            {formatCost(data.quota.daily_cost_used)} /{" "}
+                            {formatCost(data.quota.daily_cost_limit)}
+                          </span>
+                        </div>
+                        <Progress
+                          className="mt-3 h-2"
+                          value={quotaPercent(
+                            data.quota.daily_cost_used,
+                            data.quota.daily_cost_limit
+                          )}
+                        />
+                      </div>
+                    )}
+
+                    {data.quota.model_token_limits.map((item) => (
+                      <div key={item.model} className="rounded-md border p-3">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="truncate" title={item.model}>
+                            {item.model}
+                          </span>
+                          <span className="shrink-0 tabular-nums">
+                            {formatNumber(item.token_used)} / {formatNumber(item.token_limit)}
+                          </span>
+                        </div>
+                        <Progress
+                          className="mt-3 h-2"
+                          value={quotaPercent(item.token_used, item.token_limit)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
 
               {/* 按模型 */}
               {data.by_model.length > 0 && (
