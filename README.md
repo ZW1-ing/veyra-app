@@ -26,8 +26,11 @@ cd frontend && npm run dev                                                      
 打开 <http://localhost:3000/local>，直接提问即可。这一页：
 
 - 不需要登录，会话存在浏览器本地（localStorage）
+- 左侧是多会话列表：新建、重命名、删除，会话可导出为 Markdown
 - 模型可选「Veyra 智能体（带工具）」或「Veyra 蜂群（多智能体）」
 - 回答结束后附上知识库来源清单
+
+首页在检测不到 Supabase 配置时会直接引导进本地模式。
 
 ![本地模式](docs/local-mode.png)
 
