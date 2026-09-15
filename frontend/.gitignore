@@ -34,7 +34,8 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
+# next-env.d.ts 要提交：它给 tsc 提供 next 与图片模块的类型声明，
+# 靠 .gitignore 排除的话，干净检出（比如 CI）做类型检查会因为找不到 *.png 模块而报错。
 
 .VSCodeCounter
 tool-schemas
