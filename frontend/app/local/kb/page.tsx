@@ -12,9 +12,12 @@ import {
   AlertDialogTitle
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { IconRefresh, IconTrash, IconUpload } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
+import { useRef } from "react"
 
 /**
  * 知识库管理：把文档灌进后端（backend/ 的 /kb/documents），并管理已有文档。
@@ -47,6 +50,8 @@ export default function KnowledgeBasePage() {
   const [chunkSize, setChunkSize] = useState("")
   const [loading, setLoading] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<DocumentItem | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<SearchHit[] | null>(null)
@@ -153,6 +158,7 @@ export default function KnowledgeBasePage() {
     const content = await file.text()
     setName(file.name)
     setText(content)
+    toast.success(`已读取 ${file.name}（${content.length} 字），确认后点「入库」`)
   }, [])
 
   return (
@@ -177,56 +183,83 @@ export default function KnowledgeBasePage() {
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mx-auto flex max-w-4xl flex-col gap-6">
           {/* 入库 */}
-          <section className="flex flex-col gap-3">
-            <h2 className="text-sm font-semibold">新增文档</h2>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                className="border-input bg-background min-w-[220px] flex-1 rounded-md border px-3 py-2 text-sm"
-                placeholder="文档名，例如 产品手册.md"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-              <input
-                className="border-input bg-background w-40 rounded-md border px-3 py-2 text-sm"
-                placeholder="分块字数（可选）"
-                value={chunkSize}
-                onChange={(e) => setChunkSize(e.target.value)}
-              />
-              <label className="border-input hover:bg-accent flex cursor-pointer items-center gap-1 rounded-md border px-3 py-2 text-sm">
-                <IconUpload size={14} />
-                选择文件
-                <input
-                  type="file"
-                  accept=".txt,.md,.markdown,text/plain,text/markdown"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
+          <section>
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">新增文档</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                {/* 拖拽区：拖进来或点击选择文件 */}
+                <div
+                  className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-6 py-8 text-center transition-colors ${
+                    dragging ? "border-primary bg-primary/5" : "border-input hover:bg-accent/40"
+                  }`}
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    setDragging(true)
+                  }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    setDragging(false)
+                    const file = e.dataTransfer.files?.[0]
                     if (file) void onPickFile(file)
                   }}
+                >
+                  <IconUpload size={22} className="text-muted-foreground" />
+                  <p className="text-sm">把 txt / markdown 拖到这里，或点击选择文件</p>
+                  <p className="text-muted-foreground text-xs">
+                    也可以直接在下面粘贴内容
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".txt,.md,.markdown,text/plain,text/markdown"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) void onPickFile(file)
+                      e.target.value = ""
+                    }}
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    className="border-input bg-background min-w-[220px] flex-1 rounded-md border px-3 py-2 text-sm"
+                    placeholder="文档名，例如 产品手册.md"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                  <input
+                    className="border-input bg-background w-44 rounded-md border px-3 py-2 text-sm"
+                    placeholder="分块字数（可选）"
+                    value={chunkSize}
+                    onChange={(e) => setChunkSize(e.target.value)}
+                  />
+                </div>
+
+                <textarea
+                  className="border-input bg-background min-h-[160px] rounded-md border px-3 py-2 font-mono text-sm"
+                  placeholder="文档内容"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
                 />
-              </label>
-            </div>
 
-            <textarea
-              className="border-input bg-background min-h-[160px] rounded-md border px-3 py-2 font-mono text-sm"
-              placeholder="粘贴文档内容，或点上面的「选择文件」导入 txt / markdown"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-            />
-
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground text-xs">
-                分块小一点通常检索更准；留空则用后端默认值（500 字 / 重叠 80）
-              </span>
-              <button
-                className="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm disabled:opacity-50"
-                onClick={() => void ingest()}
-                disabled={loading || !name.trim() || !text.trim()}
-              >
-                {loading ? "处理中…" : "入库"}
-              </button>
-            </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground text-xs">
+                    分块小一点通常检索更准；留空则用后端默认值（500 字 / 重叠 80）
+                  </span>
+                  <Button
+                    onClick={() => void ingest()}
+                    disabled={loading || !name.trim() || !text.trim()}
+                  >
+                    {loading ? "处理中…" : "入库"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </section>
 
           {/* 检索调试 */}

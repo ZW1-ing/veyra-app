@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { backendRequestHeaders, loadSettings } from "@/lib/local-chat/settings"
 import {
@@ -249,7 +250,8 @@ export default function LocalChatPage() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2">
+        <ScrollArea className="flex-1">
+        <div className="p-2">
           {state.sessions.map((session) => (
             <div
               key={session.id}
@@ -320,6 +322,7 @@ export default function LocalChatPage() {
             </div>
           ))}
         </div>
+        </ScrollArea>
 
         <p className="text-muted-foreground border-t px-3 py-2 text-[11px] leading-relaxed">
           本地模式：无需登录，会话存在这台浏览器里。
@@ -391,7 +394,8 @@ export default function LocalChatPage() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto px-6 py-6">
+        <ScrollArea className="flex-1">
+        <main className="px-6 py-6">
           <div className="mx-auto flex max-w-3xl flex-col gap-6">
             {!active?.messages.length && (
               <p className="text-muted-foreground text-sm">
@@ -427,6 +431,7 @@ export default function LocalChatPage() {
             <div ref={bottomRef} />
           </div>
         </main>
+        </ScrollArea>
 
         <footer className="border-t px-6 py-4">
           {prompts.length > 0 && (

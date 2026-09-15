@@ -7,7 +7,20 @@ import {
   saveSettings,
   type LocalSettings
 } from "@/lib/local-chat/settings"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useCallback, useEffect, useState } from "react"
+import { toast } from "sonner"
 
 /**
  * 本地模式设置。
@@ -21,12 +34,17 @@ const MODELS = [
   { id: "veyra-swarm", label: "Veyra 蜂群（多智能体）" }
 ]
 
+interface HealthInfo {
+  status: string
+  database: string
+  provider: string
+  model: string
+}
+
 export default function LocalSettingsPage() {
   const [settings, setSettings] = useState<LocalSettings>(DEFAULT_SETTINGS)
-  const [saved, setSaved] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [health, setHealth] = useState("")
-  const [error, setError] = useState("")
+  const [health, setHealth] = useState<HealthInfo | null>(null)
 
   useEffect(() => {
     setSettings(loadSettings())
@@ -35,14 +53,12 @@ export default function LocalSettingsPage() {
   const persist = useCallback((next: LocalSettings) => {
     setSettings(next)
     saveSettings(next)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    toast.success("设置已保存")
   }, [])
 
   const test = useCallback(async () => {
     setTesting(true)
-    setHealth("")
-    setError("")
+    setHealth(null)
     try {
       const response = await fetch("/api/veyra/health", {
         headers: backendRequestHeaders(settings),
@@ -50,9 +66,10 @@ export default function LocalSettingsPage() {
       })
       const body = await response.json()
       if (!response.ok) throw new Error(body.message || `HTTP ${response.status}`)
-      setHealth(`连接正常：数据库 ${body.database}，模型后端 ${body.provider} / ${body.model}`)
+      setHealth(body as HealthInfo)
+      toast.success("连接正常")
     } catch (e) {
-      setError(e instanceof Error ? e.message : "连接失败")
+      toast.error(e instanceof Error ? e.message : "连接失败")
     } finally {
       setTesting(false)
     }
@@ -68,79 +85,143 @@ export default function LocalSettingsPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-5">
-        <div className="mx-auto flex max-w-2xl flex-col gap-5">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium">后端地址</span>
-            <input
-              className="border-input bg-background rounded-md border px-3 py-2 text-sm"
-              value={settings.backendUrl}
-              onChange={(e) => setSettings({ ...settings, backendUrl: e.target.value })}
-              placeholder="http://127.0.0.1:8000"
-            />
-            <span className="text-muted-foreground text-xs">
-              只允许本机地址（127.0.0.1 / localhost）；服务在别的机器上时，请用环境变量
-              VEYRA_API_URL 配置，并自行处理网络暴露与鉴权。
-            </span>
-          </label>
+        <div className="mx-auto max-w-2xl">
+          <Tabs defaultValue="connection">
+            <TabsList className="mb-4">
+              <TabsTrigger value="connection">后端连接</TabsTrigger>
+              <TabsTrigger value="chat">会话默认</TabsTrigger>
+              <TabsTrigger value="about">关于</TabsTrigger>
+            </TabsList>
 
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium">API Key</span>
-            <input
-              className="border-input bg-background rounded-md border px-3 py-2 text-sm"
-              value={settings.apiKey}
-              onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
-              placeholder="后端没配 API_KEYS 时留空"
-            />
-          </label>
+            {/* 后端连接 */}
+            <TabsContent value="connection" className="flex flex-col gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">服务地址</CardTitle>
+                  <CardDescription className="text-xs">
+                    只允许本机地址（127.0.0.1 / localhost）。服务在别的机器上时，请用环境变量
+                    VEYRA_API_URL 配置，并自行处理网络暴露与鉴权。
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="backend-url">后端地址</Label>
+                    <input
+                      id="backend-url"
+                      className="border-input bg-background rounded-md border px-3 py-2 text-sm"
+                      value={settings.backendUrl}
+                      onChange={(e) => setSettings({ ...settings, backendUrl: e.target.value })}
+                      placeholder="http://127.0.0.1:8000"
+                    />
+                  </div>
 
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium">新会话默认模式</span>
-            <select
-              className="border-input bg-background rounded-md border px-3 py-2 text-sm"
-              value={settings.defaultModel}
-              onChange={(e) => setSettings({ ...settings, defaultModel: e.target.value })}
-            >
-              {MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="backend-key">API Key</Label>
+                    <input
+                      id="backend-key"
+                      className="border-input bg-background rounded-md border px-3 py-2 text-sm"
+                      value={settings.apiKey}
+                      onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
+                      placeholder="后端没配 API_KEYS 时留空"
+                    />
+                  </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              className="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm"
-              onClick={() => persist(settings)}
-            >
-              保存
-            </button>
-            <button
-              className="border-input hover:bg-accent rounded-md border px-4 py-2 text-sm disabled:opacity-50"
-              onClick={() => void test()}
-              disabled={testing}
-            >
-              {testing ? "测试中…" : "测试连接"}
-            </button>
-            <button
-              className="text-muted-foreground hover:text-foreground text-sm underline"
-              onClick={() => persist(DEFAULT_SETTINGS)}
-            >
-              恢复默认
-            </button>
-            {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400">已保存</span>}
-          </div>
+                  <div>
+                    <Button
+                      variant="outline"
+                      className="mr-2"
+                      onClick={() => void test()}
+                      disabled={testing}
+                    >
+                      {testing ? "测试中…" : "测试连接"}
+                    </Button>
+                    <Button onClick={() => persist(settings)}>保存</Button>
+                  </div>
 
-          {health && (
-            <div className="rounded-md border border-emerald-500/40 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
-              {health}
-            </div>
-          )}
-          {error && (
-            <div className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm">
-              {error}
-            </div>
-          )}
+                  {health && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <Badge variant="secondary">状态 {health.status}</Badge>
+                      <Badge variant="secondary">数据库 {health.database}</Badge>
+                      <Badge variant="secondary">
+                        {health.provider} / {health.model}
+                      </Badge>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* 会话默认 */}
+            <TabsContent value="chat">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">新会话默认模式</CardTitle>
+                  <CardDescription className="text-xs">
+                    单智能体会按需调用工具；蜂群模式由 Leader 拆解任务后分给多个成员协作完成。
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4">
+                  <Select
+                    value={settings.defaultModel}
+                    onValueChange={(value) => setSettings({ ...settings, defaultModel: value })}
+                  >
+                    <SelectTrigger className="w-[260px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MODELS.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div>
+                    <Button onClick={() => persist(settings)}>保存</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* 关于 */}
+            <TabsContent value="about">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">关于本地模式</CardTitle>
+                  <CardDescription className="text-xs">
+                    会话、助手与设置都存在这台浏览器里；检索与生成由本机的 Python 后端完成，
+                    不上传任何数据到第三方服务。
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-28">会话与助手</span>
+                    <code className="rounded bg-muted px-1.5 py-0.5">localStorage</code>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-28">知识库与用量</span>
+                    <code className="rounded bg-muted px-1.5 py-0.5">backend / MySQL</code>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-28">接口文档</span>
+                    <a
+                      className="underline"
+                      href={`${settings.backendUrl.replace(/\/+$/, "")}/docs`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {settings.backendUrl}/docs
+                    </a>
+                  </div>
+                  <div className="mt-2">
+                    <Button variant="ghost" size="sm" onClick={() => persist(DEFAULT_SETTINGS)}>
+                      恢复默认设置
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </div>

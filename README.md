@@ -46,20 +46,32 @@ Agent 编排。数据、密钥与对话记录都留在本机，不依赖任何�
 
 <table>
   <tr>
-    <td width="33.33%">
+    <td width="50%">
       <img src="docs/local-mode.png" alt="会话" width="100%" />
-      <p align="center"><sub>会话：多会话、流式回答、来源引用</sub></p>
+      <p align="center"><sub><b>会话</b>：流式回答、来源引用、多会话管理</sub></p>
     </td>
-    <td width="33.33%">
+    <td width="50%">
       <img src="docs/knowledge-base.png" alt="知识库" width="100%" />
-      <p align="center"><sub>知识库：入库、分块信息、检索调试</sub></p>
+      <p align="center"><sub><b>知识库</b>：拖拽入库、分块信息、检索调试</sub></p>
     </td>
-    <td width="33.33%">
+  </tr>
+  <tr>
+    <td width="50%">
       <img src="docs/assistants.png" alt="助手" width="100%" />
-      <p align="center"><sub>助手与提示词：角色设定 + 默认模型</sub></p>
+      <p align="center"><sub><b>助手与提示词</b>：卡片管理、弹窗编辑</sub></p>
+    </td>
+    <td width="50%">
+      <img src="docs/usage.png" alt="用量" width="100%" />
+      <p align="center"><sub><b>用量</b>：按模型与日期聚合 token 消耗</sub></p>
     </td>
   </tr>
 </table>
+
+界面基于 Tailwind + shadcn/ui（Radix 无障碍原语）构建，支持**明暗主题切换**：
+
+<p align="center">
+  <img src="docs/local-mode-light.png" alt="亮色主题" width="70%" />
+</p>
 
 ## 核心能力
 
