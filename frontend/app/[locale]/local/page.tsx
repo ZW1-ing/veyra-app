@@ -1,6 +1,7 @@
 "use client"
 
 import { MessageMarkdown } from "@/components/messages/message-markdown"
+import { backendRequestHeaders, loadSettings } from "@/lib/local-chat/settings"
 import {
   createSession,
   loadState,
@@ -40,6 +41,10 @@ export default function LocalChatPage() {
 
   // 首次进入：读本地会话；一个都没有就建一个
   useEffect(() => {
+    // 新会话的默认模式来自设置页
+    const settings = loadSettings()
+    if (settings.defaultModel) setModel(settings.defaultModel)
+
     const loaded = loadState()
     if (loaded.sessions.length === 0) {
       const session = createSession()
@@ -130,7 +135,8 @@ export default function LocalChatPage() {
     try {
       const response = await fetch("/api/chat/veyra", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // 带上前端设置里的后端地址与密钥（见 lib/veyra-backend.ts）
+        headers: backendRequestHeaders(loadSettings()),
         body: JSON.stringify({
           chatSettings: { model, temperature: 0.5 },
           // 首条消息的 id 决定后端会话，从而决定多轮上下文
@@ -165,7 +171,7 @@ export default function LocalChatPage() {
   }, [active, input, model, patchSession, streaming])
 
   return (
-    <div className="bg-background text-foreground flex h-dvh w-full">
+    <div className="flex min-w-0 flex-1">
       {/* 会话列表 */}
       <aside className="flex w-64 shrink-0 flex-col border-r">
         <div className="flex items-center justify-between border-b px-3 py-3">

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { ServerRuntime } from "next"
+import { backendHeaders, resolveBackend } from "@/lib/veyra-backend"
 
 /**
  * 把前端的聊天请求转给自建的 Python 后端。
@@ -9,8 +10,6 @@ import { ServerRuntime } from "next"
  */
 export const runtime: ServerRuntime = "nodejs"
 export const dynamic = "force-dynamic"
-
-const BACKEND_URL = (process.env.VEYRA_API_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "")
 
 interface IncomingMessage {
   id?: string
@@ -132,12 +131,12 @@ export async function POST(request: Request) {
       return new Response(JSON.stringify({ message: "没有找到用户消息" }), { status: 400 })
     }
 
-    const headers: Record<string, string> = { "Content-Type": "application/json" }
-    if (process.env.VEYRA_API_KEY) headers["X-API-Key"] = process.env.VEYRA_API_KEY
+    // 后端地址与密钥来自请求头（前端设置页）或环境变量，见 lib/veyra-backend.ts
+    const target = resolveBackend(request)
 
-    const upstream = await fetch(`${BACKEND_URL}/chat/stream`, {
+    const upstream = await fetch(`${target.baseUrl}/chat/stream`, {
       method: "POST",
-      headers,
+      headers: backendHeaders(target),
       body: JSON.stringify({
         message: question,
         // 模型名决定编排方式：蜂群档位走多智能体，其余走单智能体
@@ -166,12 +165,12 @@ export async function POST(request: Request) {
       }
     })
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "请求 Veyra 后端失败"
+    const message = error instanceof Error ? error.message : "请求 Veyra 后端失败"
+    const target = resolveBackend(request)
 
     // 后端没起的时候给出可执行的提示，而不是一句「服务器错误」
     const hint = message.includes("ECONNREFUSED")
-      ? `连不上 Veyra 后端（${BACKEND_URL}）。请先在 backend/ 目录启动服务：uvicorn app.main:app --port 8000`
+      ? `连不上 Veyra 后端（${target.baseUrl}）。请先在 backend/ 目录启动服务：uvicorn app.main:app --port 8000`
       : message
 
     return new Response(JSON.stringify({ message: hint }), { status: 502 })
