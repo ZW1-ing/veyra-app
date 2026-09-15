@@ -43,5 +43,6 @@ custom-prompts
 
 sw.js
 sw.js.map
+worker-development.js
 workbox-*.js
 workbox-*.js.map
