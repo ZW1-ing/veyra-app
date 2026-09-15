@@ -10,6 +10,7 @@
     "lint:fix": "next lint --fix",
     "type-check": "tsc --noEmit",
     "test": "jest",
+    "test:e2e": "playwright test",
     "format:write": "prettier --write \"{app,lib,components,types}/**/*.{ts,tsx}\" --cache",
     "format:check": "prettier --check \"{app,lib,components,types}/**/*.{ts,tsx}\" --cache"
   },

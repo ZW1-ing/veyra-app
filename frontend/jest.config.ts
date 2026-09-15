@@ -9,7 +9,9 @@ const createJestConfig = nextJest({
 // Add any custom config to be passed to Jest
 const config: Config = {
   coverageProvider: "v8",
-  testEnvironment: "jsdom"
+  testEnvironment: "jsdom",
+  // Playwright 用例由 test:e2e 单独执行，不能被 Jest 当成 jsdom 单测加载
+  testPathIgnorePatterns: ["/node_modules/", "<rootDir>/.next/", "<rootDir>/e2e/"]
   // Add more setup options before each test is run
   // setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
 }

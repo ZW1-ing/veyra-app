@@ -193,15 +193,18 @@ export default function LocalChatPage() {
     URL.revokeObjectURL(url)
   }, [])
 
-  /** 发送一轮对话。override 用于「重新生成」：直接用上一条用户消息重跑，不经输入框。 */
+  /**
+   * 跑一轮对话。
+   *
+   * history 由调用方给出（已经包含本轮的提问）：
+   * - 正常发送：追加一条新的用户消息
+   * - 重新生成：传截断后的历史（结尾仍是原来那条用户消息，不重复追加）
+   */
   const send = useCallback(
-    async (override?: string) => {
-    const question = (override ?? input).trim()
-    if (!question || streaming || !active) return
+    async (question: string, history: LocalMessage[]) => {
+    if (!question.trim() || streaming || !active) return
 
-    const userMessage: LocalMessage = { id: newId(), role: "user", content: question }
     const assistantMessage: LocalMessage = { id: newId(), role: "assistant", content: "" }
-    const history = [...active.messages, userMessage]
     const sessionId = active.id
     const assistant = assistants.find((a) => a.id === assistantId)
 
@@ -254,7 +257,7 @@ export default function LocalChatPage() {
       setStreaming(false)
     }
     },
-    [active, assistantId, assistants, input, model, patchSession, streaming]
+    [active, assistantId, assistants, model, patchSession, streaming]
   )
 
   /**
@@ -272,14 +275,20 @@ export default function LocalChatPage() {
         .find((m) => m.role === "user")?.content
       if (!question) return
 
-      patchSession(active.id, (session) => ({
-        ...session,
-        messages: session.messages.slice(0, index)
-      }))
-      await send(question)
+      // 历史截到这条回答之前（结尾正是那条用户提问），不重复追加用户消息
+      await send(question, active.messages.slice(0, index))
     },
-    [active, patchSession, send, streaming]
+    [active, send, streaming]
   )
+
+  /** 输入框提交：把这条提问追加进历史后交给 send */
+  const submit = useCallback(() => {
+    if (!active) return
+    const question = input.trim()
+    if (!question || streaming) return
+    const userMessage: LocalMessage = { id: newId(), role: "user", content: question }
+    void send(question, [...active.messages, userMessage])
+  }, [active, input, send, streaming])
 
   const copyMessage = useCallback(async (content: string) => {
     try {
@@ -576,13 +585,13 @@ export default function LocalChatPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault()
-                  void send()
+                  submit()
                 }
               }}
             />
             <button
               className="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm disabled:opacity-50"
-              onClick={() => void send()}
+              onClick={submit}
               disabled={streaming || !input.trim()}
             >
               {streaming ? "生成中…" : "发送"}

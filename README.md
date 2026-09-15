@@ -52,7 +52,7 @@ Agent 编排。数据、密钥与对话记录都留在本机，不依赖任何�
     </td>
     <td width="50%">
       <img src="docs/knowledge-base.png" alt="知识库" width="100%" />
-      <p align="center"><sub><b>知识库</b>：拖拽入库、分块信息、检索调试</sub></p>
+      <p align="center"><sub><b>知识库</b>：拖拽入库、名称搜索、列排序、检索调试</sub></p>
     </td>
   </tr>
   <tr>
@@ -92,7 +92,7 @@ Agent 编排。数据、密钥与对话记录都留在本机，不依赖任何�
 | 跨模型对话 | SSE 流式输出、会话内切换模型、缺密钥自动降级到离线 mock | `backend/app/llm/` |
 | Agent 工具调用 | 模型自主决定调用工具，循环有步数上限与整体超时 | `backend/app/agent/graph.py` |
 | 多智能体协作 | Leader 规划 → 依赖感知并发调度 → 汇总，成员失败不影响其他成员 | `backend/app/agent/swarm.py` |
-| 知识库 RAG | 分块入库、混合检索（TF-IDF + 向量）、回答带 `[S1]` 来源编号 | `backend/app/kb/` |
+| 知识库 RAG | 分块入库、名称搜索与排序、混合检索（TF-IDF + 向量）、回答带 `[S1]` 来源编号 | `backend/app/kb/` |
 | 助手与提示词 | 角色设定与可复用指令模板，选中后作为系统提示词下发 | `frontend/app/local/assistants/` |
 | 会话与用量 | 会话、消息、token 用量落 MySQL，Alembic 管理迁移 | `backend/app/db/` |
 | 用量统计 | 按模型与日期聚合 token 用量并可视化 | `backend/app/api/routes/usage.py` |
@@ -315,7 +315,7 @@ Leader 输出 JSON 计划后要过三道关：id 唯一、依赖存在、不能�
 ## 测试与 CI
 
 ```powershell
-# 后端：51 项，离线可跑（SQLite + mock 模型）
+# 后端：64 项，离线可跑（SQLite + mock 模型）
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\ruff.exe check app tests scripts
@@ -327,6 +327,10 @@ cd backend
 # 前端：类型检查、lint、7 项单测
 cd frontend
 npm run type-check && npm run lint && npm test && npm run build
+
+# 浏览器 E2E：自动拉起 mock 后端 + SQLite，不依赖 Ollama 或 MySQL
+npx playwright install chromium
+npm run test:e2e
 ```
 
 CI（`.github/workflows/ci.yml`）在每次推送时跑三个 job：
@@ -334,7 +338,7 @@ CI（`.github/workflows/ci.yml`）在每次推送时跑三个 job：
 | Job | 内容 |
 | --- | --- |
 | 后端 | ruff + pytest + **检索评估回归门禁** + 在真实 MySQL 8.4 容器上跑迁移与一致性校验 |
-| 前端 | 类型检查 + lint + 单测 |
+| 前端 | 类型检查 + lint + 单测 + Playwright 浏览器 E2E |
 | 容器 | 校验 compose 配置并**真构建镜像** |
 
 ## Roadmap

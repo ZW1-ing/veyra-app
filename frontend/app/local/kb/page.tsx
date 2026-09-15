@@ -18,10 +18,18 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { IconRefresh, IconTrash, IconUpload } from "@tabler/icons-react"
+import {
+  IconArrowDown,
+  IconArrowUp,
+  IconRefresh,
+  IconSearch,
+  IconTrash,
+  IconUpload
+} from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useRef } from "react"
+import { useMemo } from "react"
 
 /**
  * 知识库管理：把文档灌进后端（backend/ 的 /kb/documents），并管理已有文档。
@@ -56,10 +64,37 @@ export default function KnowledgeBasePage() {
   const [pendingDelete, setPendingDelete] = useState<DocumentItem | null>(null)
   const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [nameFilter, setNameFilter] = useState("")
+  const [sort, setSort] = useState<{ key: "name" | "char_count" | "created_at"; dir: "asc" | "desc" }>(
+    { key: "created_at", dir: "desc" }
+  )
 
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<SearchHit[] | null>(null)
   const [searching, setSearching] = useState(false)
+
+  /** 按名称过滤 + 按列排序。文档数量不大，在前端算即可，不必再麻烦后端 */
+  const visibleDocuments = useMemo(() => {
+    const keyword = nameFilter.trim().toLowerCase()
+    const filtered = keyword
+      ? documents.filter((item) => item.name.toLowerCase().includes(keyword))
+      : documents
+
+    const factor = sort.dir === "asc" ? 1 : -1
+    return [...filtered].sort((a, b) => {
+      if (sort.key === "name") return a.name.localeCompare(b.name, "zh-CN") * factor
+      if (sort.key === "char_count") return (a.char_count - b.char_count) * factor
+      return (Date.parse(a.created_at) - Date.parse(b.created_at)) * factor
+    })
+  }, [documents, nameFilter, sort])
+
+  const toggleSort = useCallback((key: "name" | "char_count" | "created_at") => {
+    setSort((current) =>
+      current.key === key
+        ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "name" ? "asc" : "desc" }
+    )
+  }, [])
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -355,23 +390,91 @@ export default function KnowledgeBasePage() {
 
           {/* 文档列表 */}
           <section className="flex flex-col gap-3">
-            <h2 className="text-sm font-semibold">已有文档（{documents.length}）</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold">
+                已有文档（{visibleDocuments.length}
+                {nameFilter.trim() && documents.length !== visibleDocuments.length
+                  ? ` / ${documents.length}`
+                  : ""}
+                ）
+              </h2>
+              <div className="relative">
+                <IconSearch
+                  size={14}
+                  className="text-muted-foreground absolute top-1/2 left-2.5 -translate-y-1/2"
+                />
+                <input
+                  className="border-input bg-background w-56 rounded-md border py-1.5 pr-3 pl-8 text-sm"
+                  placeholder="按名称搜索文档"
+                  value={nameFilter}
+                  onChange={(e) => setNameFilter(e.target.value)}
+                />
+              </div>
+            </div>
+
             {documents.length === 0 ? (
               <p className="text-muted-foreground text-sm">还没有文档，先在上面入库一篇。</p>
+            ) : visibleDocuments.length === 0 ? (
+              <p className="text-muted-foreground text-sm">
+                没有名称包含「{nameFilter}」的文档。
+              </p>
             ) : (
               <div className="overflow-hidden rounded-md border">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50 text-muted-foreground text-xs">
                     <tr>
-                      <th className="px-3 py-2 text-left font-medium">文档</th>
-                      <th className="px-3 py-2 text-right font-medium">字数</th>
+                      <th className="px-3 py-2 text-left font-medium">
+                        <button
+                          className="hover:text-foreground flex items-center gap-1"
+                          onClick={() => toggleSort("name")}
+                          title="按名称排序"
+                        >
+                          文档
+                          {sort.key === "name" &&
+                            (sort.dir === "asc" ? (
+                              <IconArrowUp size={12} />
+                            ) : (
+                              <IconArrowDown size={12} />
+                            ))}
+                        </button>
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        <button
+                          className="hover:text-foreground ml-auto flex items-center gap-1"
+                          onClick={() => toggleSort("char_count")}
+                          title="按字数排序"
+                        >
+                          字数
+                          {sort.key === "char_count" &&
+                            (sort.dir === "asc" ? (
+                              <IconArrowUp size={12} />
+                            ) : (
+                              <IconArrowDown size={12} />
+                            ))}
+                        </button>
+                      </th>
                       <th className="px-3 py-2 text-right font-medium">块大小</th>
                       <th className="px-3 py-2 text-left font-medium">嵌入模型</th>
+                      <th className="px-3 py-2 text-left font-medium">
+                        <button
+                          className="hover:text-foreground flex items-center gap-1"
+                          onClick={() => toggleSort("created_at")}
+                          title="按入库时间排序"
+                        >
+                          入库时间
+                          {sort.key === "created_at" &&
+                            (sort.dir === "asc" ? (
+                              <IconArrowUp size={12} />
+                            ) : (
+                              <IconArrowDown size={12} />
+                            ))}
+                        </button>
+                      </th>
                       <th className="px-3 py-2" />
                     </tr>
                   </thead>
                   <tbody>
-                    {documents.map((document) => (
+                    {visibleDocuments.map((document) => (
                       <tr key={document.id} className="border-t">
                         <td className="max-w-[280px] truncate px-3 py-2" title={document.name}>
                           {document.name}
@@ -387,6 +490,14 @@ export default function KnowledgeBasePage() {
                           ) : (
                             <span className="text-muted-foreground">—</span>
                           )}
+                        </td>
+                        <td className="text-muted-foreground px-3 py-2 text-xs whitespace-nowrap">
+                          {new Date(document.created_at).toLocaleString("zh-CN", {
+                            month: "2-digit",
+                            day: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
                         </td>
                         <td className="px-3 py-2 text-right">
                           <button
