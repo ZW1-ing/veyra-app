@@ -10,6 +10,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from ..llm.base import ToolSpec
+
 
 @dataclass
 class Tool:
@@ -40,6 +42,28 @@ class ToolRegistry:
         if not self._tools:
             return "（当前没有可用工具）"
         return "\n".join(tool.spec_text() for tool in self._tools.values())
+
+    def tool_specs(self) -> list[ToolSpec]:
+        """转成模型能读懂的工具声明（JSON Schema）。
+
+        参数统一按字符串描述：当前几个内置工具的参数都是字符串，
+        参数类型一旦复杂起来，这里要改成真正带类型的 schema。
+        """
+        return [
+            ToolSpec(
+                name=tool.name,
+                description=tool.description,
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        name: {"type": "string", "description": desc}
+                        for name, desc in tool.parameters.items()
+                    },
+                    "required": list(tool.parameters.keys()),
+                },
+            )
+            for tool in self._tools.values()
+        ]
 
     def run(self, name: str, args: dict) -> tuple[bool, str]:
         """执行工具。返回 (是否成功, 文本结果)。"""

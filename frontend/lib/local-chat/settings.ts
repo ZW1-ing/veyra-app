@@ -45,3 +45,11 @@ export function backendRequestHeaders(settings: LocalSettings): Record<string, s
   if (settings.apiKey) headers["X-Veyra-Key"] = settings.apiKey
   return headers
 }
+
+/** 上传文件时用：同样不设 Content-Type，交给浏览器生成 multipart boundary */
+export function backendUploadHeaders(settings: LocalSettings): Record<string, string> {
+  const headers: Record<string, string> = {}
+  if (settings.backendUrl) headers["X-Veyra-Backend"] = settings.backendUrl
+  if (settings.apiKey) headers["X-Veyra-Key"] = settings.apiKey
+  return headers
+}

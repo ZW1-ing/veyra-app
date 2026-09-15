@@ -19,7 +19,7 @@ async def test_slow_db_query_does_not_block_event_loop(monkeypatch):
     如果同步查询留在事件循环里，这 0.3 秒内心跳计数会停在个位数。
     """
 
-    def slow_load(db):
+    def slow_load(db, owner_id="anonymous"):
         time.sleep(0.3)
         return []
 

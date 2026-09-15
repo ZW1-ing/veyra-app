@@ -72,7 +72,7 @@ async def main() -> None:
             continue
         top = ranked[0]
         _, coverage = lexical_score(query, top.document_name, top.text, idf_map)
-        mark = "✓" if expected and top.document_name == expected else ("✗" if expected else "")
+        mark = "命中" if expected and top.document_name == expected else ("未命中" if expected else "")
         print(
             f"{query:<44} {top.score:>8.3f} {coverage:>8.3f}  "
             f"{expected or '无相关内容'} {mark}"

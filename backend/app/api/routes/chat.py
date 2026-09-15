@@ -5,15 +5,26 @@
 """
 
 import json
+import logging
+import time
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from ...agent.tools import build_default_registry
 from ...core.config import Settings
+from ...core.metrics import (
+    CHAT_COST,
+    CHAT_DURATION,
+    CHAT_FIRST_TOKEN,
+    CHAT_REQUESTS,
+    CHAT_TOKENS,
+    QUOTA_REJECTIONS,
+)
+from ...core.observability import current_request_id
 from ...db.session import get_session_factory
 from ...kb.embedding import EmbeddingProvider
 from ...kb.service import KnowledgeSource
@@ -22,9 +33,18 @@ from ...schemas.chat import ChatRequest, ChatResponse
 from ...schemas.kb import SourceOut
 from ...services import chat as chat_service
 from ...services.dialogue import stream_dialogue
-from ..deps import embedding_dep, enforce_rate_limit, get_db, provider_dep, settings_dep
+from ...services.quota import check_quota
+from ..deps import (
+    Principal,
+    embedding_dep,
+    enforce_rate_limit,
+    get_db,
+    provider_dep,
+    settings_dep,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(enforce_rate_limit)])
+logger = logging.getLogger(__name__)
 
 
 def _sse(event: dict) -> str:
@@ -35,19 +55,35 @@ def _source_out(sources: list[KnowledgeSource]) -> list[SourceOut]:
     return [SourceOut(**source.__dict__) for source in sources]
 
 
-def _prepare(db: Session, payload: ChatRequest, embedding, settings: Settings):
-    session = chat_service.ensure_session(db, payload.session_id, payload.message)
+def _prepare(
+    db: Session,
+    payload: ChatRequest,
+    embedding,
+    settings: Settings,
+    owner_id: str,
+):
+    try:
+        session = chat_service.ensure_session(
+            db, payload.session_id, payload.message, owner_id=owner_id
+        )
+    except chat_service.SessionAccessDenied as exc:
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
     if payload.mode and payload.mode != session.mode:
         session.mode = payload.mode
         db.commit()
         db.refresh(session)
-    chat_service.append_message(db, session.id, "user", payload.message)
+    chat_service.append_message(db, session.id, "user", payload.message, owner_id=owner_id)
     return session
 
 
-async def _knowledge(db, payload, embedding, settings) -> list[KnowledgeSource]:
+async def _knowledge(db, payload, embedding, settings, owner_id: str) -> list[KnowledgeSource]:
     return await chat_service.collect_knowledge(
-        db, embedding, settings, payload.message, payload.use_knowledge
+        db,
+        embedding,
+        settings,
+        payload.message,
+        payload.use_knowledge,
+        owner_id=owner_id,
     )
 
 
@@ -57,11 +93,24 @@ def _persist(
     text: str,
     provider: LLMProvider,
     usage: Usage,
-) -> None:
+    owner_id: str,
+    settings: Settings,
+    request_id: str,
+) -> float:
     """流式结束后另开一个短会话把回答与用量写库。"""
     with factory() as db:
-        chat_service.append_message(db, session_id, "assistant", text)
-        chat_service.record_usage(db, session_id, provider.model, usage)
+        chat_service.append_message(
+            db, session_id, "assistant", text, owner_id=owner_id
+        )
+        return chat_service.record_usage(
+            db,
+            session_id,
+            provider.model,
+            usage,
+            owner_id=owner_id,
+            settings=settings,
+            request_id=request_id,
+        )
 
 
 @router.post("/stream")
@@ -71,12 +120,36 @@ async def chat_stream(
     provider: LLMProvider = Depends(provider_dep),
     embedding: EmbeddingProvider = Depends(embedding_dep),
     settings: Settings = Depends(settings_dep),
+    principal: Principal = Depends(enforce_rate_limit),
 ) -> StreamingResponse:
     # 数据库是同步驱动，放进线程池执行，别卡住事件循环
-    session = await run_in_threadpool(_prepare, db, payload, embedding, settings)
-    sources = await _knowledge(db, payload, embedding, settings)
+    quota = await run_in_threadpool(
+        check_quota,
+        db,
+        quota_key=principal.key,
+        owner_id=principal.owner_id,
+        model=provider.model,
+        settings=settings,
+    )
+    if not quota.allowed:
+        QUOTA_REJECTIONS.labels(quota.scope).inc()
+        CHAT_REQUESTS.labels(payload.mode or "single", provider.model, "quota_rejected").inc()
+        raise HTTPException(
+            status_code=429,
+            detail=quota.detail,
+            headers={"Retry-After": str(quota.retry_after)},
+        )
+
+    session = await run_in_threadpool(
+        _prepare, db, payload, embedding, settings, principal.owner_id
+    )
+    sources = await _knowledge(db, payload, embedding, settings, principal.owner_id)
     history = await run_in_threadpool(
-        chat_service.load_history, db, session.id, settings.history_max_tokens
+        chat_service.load_history,
+        db,
+        session.id,
+        settings.history_max_tokens,
+        owner_id=principal.owner_id,
     )
     context = chat_service.build_context(history, chat_service.knowledge_prompt(sources))
 
@@ -85,6 +158,8 @@ async def chat_stream(
     factory = get_session_factory()
     mode = payload.mode or session.mode
     knowledge = chat_service.knowledge_prompt(sources)
+    started = time.perf_counter()
+    request_id = current_request_id()
 
     async def event_stream() -> AsyncIterator[str]:
         yield _sse(
@@ -100,6 +175,8 @@ async def chat_stream(
         steps = 0
         tool_calls: list[str] = []
         members: list[dict] = []
+        first_token_ms: float | None = None
+        cost = 0.0
 
         try:
             stream = stream_dialogue(
@@ -115,6 +192,8 @@ async def chat_stream(
             )
             async for event in stream:
                 if event["type"] == "token":
+                    if first_token_ms is None:
+                        first_token_ms = (time.perf_counter() - started) * 1000
                     collected.append(event["text"])
                     yield _sse(event)
                 elif event["type"] in ("action", "tool", "plan", "member"):
@@ -129,7 +208,41 @@ async def chat_stream(
                     )
                     steps = int(event.get("steps", 0))
                     members = event.get("members", [])
-                    await run_in_threadpool(_persist, factory, session.id, text, provider, usage)
+                    cost = await run_in_threadpool(
+                        _persist,
+                        factory,
+                        session.id,
+                        text,
+                        provider,
+                        usage,
+                        principal.owner_id,
+                        settings,
+                        request_id,
+                    )
+                    logger.info(
+                        "chat_completed mode=%s model=%s sources=%d steps=%d "
+                        "tool_calls=%d first_token_ms=%.1f duration_ms=%.1f cost=%.8f",
+                        mode,
+                        provider.model,
+                        len(sources),
+                        steps,
+                        len(tool_calls),
+                        first_token_ms or 0.0,
+                        (time.perf_counter() - started) * 1000,
+                        cost,
+                    )
+                    duration = time.perf_counter() - started
+                    CHAT_REQUESTS.labels(mode, provider.model, "success").inc()
+                    CHAT_DURATION.labels(mode, provider.model).observe(duration)
+                    if first_token_ms is not None:
+                        CHAT_FIRST_TOKEN.labels(mode, provider.model).observe(
+                            first_token_ms / 1000
+                        )
+                    CHAT_TOKENS.labels(provider.model, "prompt").inc(usage.prompt_tokens)
+                    CHAT_TOKENS.labels(provider.model, "completion").inc(
+                        usage.completion_tokens
+                    )
+                    CHAT_COST.labels(provider.model).inc(cost)
                     yield _sse(
                         {
                             "type": "final",
@@ -142,10 +255,22 @@ async def chat_stream(
                             "usage": {
                                 "prompt_tokens": usage.prompt_tokens,
                                 "completion_tokens": usage.completion_tokens,
+                                "cost": cost,
                             },
+                            "request_id": request_id,
                         }
                     )
         except Exception as exc:  # noqa: BLE001 流已开始，只能把错误当事件吐出
+            CHAT_REQUESTS.labels(mode, provider.model, "error").inc()
+            CHAT_DURATION.labels(mode, provider.model).observe(
+                time.perf_counter() - started
+            )
+            logger.exception(
+                "chat_stream_failed mode=%s model=%s duration_ms=%.1f",
+                mode,
+                provider.model,
+                (time.perf_counter() - started) * 1000,
+            )
             yield _sse({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
             return
         yield "data: [DONE]\n\n"
@@ -164,11 +289,36 @@ async def chat_once(
     provider: LLMProvider = Depends(provider_dep),
     embedding: EmbeddingProvider = Depends(embedding_dep),
     settings: Settings = Depends(settings_dep),
+    principal: Principal = Depends(enforce_rate_limit),
 ) -> ChatResponse:
-    session = await run_in_threadpool(_prepare, db, payload, embedding, settings)
-    sources = await _knowledge(db, payload, embedding, settings)
+    started = time.perf_counter()
+    quota = await run_in_threadpool(
+        check_quota,
+        db,
+        quota_key=principal.key,
+        owner_id=principal.owner_id,
+        model=provider.model,
+        settings=settings,
+    )
+    if not quota.allowed:
+        QUOTA_REJECTIONS.labels(quota.scope).inc()
+        CHAT_REQUESTS.labels(payload.mode or "single", provider.model, "quota_rejected").inc()
+        raise HTTPException(
+            status_code=429,
+            detail=quota.detail,
+            headers={"Retry-After": str(quota.retry_after)},
+        )
+
+    session = await run_in_threadpool(
+        _prepare, db, payload, embedding, settings, principal.owner_id
+    )
+    sources = await _knowledge(db, payload, embedding, settings, principal.owner_id)
     history = await run_in_threadpool(
-        chat_service.load_history, db, session.id, settings.history_max_tokens
+        chat_service.load_history,
+        db,
+        session.id,
+        settings.history_max_tokens,
+        owner_id=principal.owner_id,
     )
     context = chat_service.build_context(history, chat_service.knowledge_prompt(sources))
 
@@ -207,15 +357,51 @@ async def chat_once(
                 int(event.get("usage", {}).get("completion_tokens", 0)),
             )
 
-    await run_in_threadpool(chat_service.append_message, db, session.id, "assistant", text)
-    await run_in_threadpool(chat_service.record_usage, db, session.id, provider.model, usage)
+    await run_in_threadpool(
+        chat_service.append_message,
+        db,
+        session.id,
+        "assistant",
+        text,
+        owner_id=principal.owner_id,
+    )
+    cost = await run_in_threadpool(
+        chat_service.record_usage,
+        db,
+        session.id,
+        provider.model,
+        usage,
+        owner_id=principal.owner_id,
+        settings=settings,
+    )
+    logger.info(
+        "chat_completed mode=%s model=%s sources=%d steps=%d tool_calls=%d "
+        "duration_ms=%.1f cost=%.8f",
+        mode,
+        provider.model,
+        len(sources),
+        steps,
+        len(tool_calls),
+        (time.perf_counter() - started) * 1000,
+        cost,
+    )
+    CHAT_REQUESTS.labels(mode, provider.model, "success").inc()
+    CHAT_DURATION.labels(mode, provider.model).observe(time.perf_counter() - started)
+    CHAT_TOKENS.labels(provider.model, "prompt").inc(usage.prompt_tokens)
+    CHAT_TOKENS.labels(provider.model, "completion").inc(usage.completion_tokens)
+    CHAT_COST.labels(provider.model).inc(cost)
 
     return ChatResponse(
         session_id=session.id,
         text=text,
         steps=steps,
         mode=mode,
-        usage={"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens},
+        usage={
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+        },
+        cost=cost,
+        request_id=current_request_id(),
         sources=_source_out(sources),
         tool_calls=tool_calls,
         members=members,

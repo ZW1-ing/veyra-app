@@ -19,6 +19,40 @@ from dataclasses import dataclass
 
 from .embedding import cosine_similarity
 
+try:  # numpy 是可选的：没装时退回纯 Python，功能一样，只是慢一些
+    import numpy as _np
+except ImportError:  # pragma: no cover - 取决于环境
+    _np = None
+
+# 候选少于这个数时，转成 numpy 数组的开销反而更大，直接用 Python 循环
+_NUMPY_THRESHOLD = 64
+
+
+def cosine_scores_batch(
+    query: Sequence[float], vectors: Sequence[Sequence[float]]
+) -> list[float]:
+    """批量余弦相似度。
+
+    数据量小的时候逐条算；超过阈值就转成矩阵一次算完。
+    这是「全量余弦」在几千块规模下依然够用的关键——
+    真正的 ANN 索引（pgvector / faiss）要等到矩阵乘法都嫌慢时才值得引入。
+    """
+    if not vectors:
+        return []
+    if _np is None or len(vectors) < _NUMPY_THRESHOLD:
+        return [max(0.0, cosine_similarity(query, v)) for v in vectors]
+
+    matrix = _np.asarray(vectors, dtype=_np.float32)
+    vector = _np.asarray(query, dtype=_np.float32)
+    if matrix.ndim != 2 or vector.shape[0] != matrix.shape[1]:
+        # 维度不齐（比如混了不同嵌入模型的向量）：退回逐条，交给上层校验处理
+        return [max(0.0, cosine_similarity(query, v)) for v in vectors]
+
+    norms = _np.linalg.norm(matrix, axis=1) * _np.linalg.norm(vector)
+    norms[norms == 0] = 1.0  # 零向量当作不相似
+    scores = (matrix @ vector) / norms
+    return [max(0.0, float(score)) for score in scores]
+
 
 def tokenize(text: str) -> list[str]:
     lowered = (text or "").lower()
@@ -124,14 +158,21 @@ def rank_chunks(
     chunk_index / text / embedding。
     """
     idf_map = build_idf(candidates)
+    # 向量相似度先批量算完（检索里最重的计算在这）
+    vector_scores = (
+        cosine_scores_batch(
+            query_embedding, [item.get("embedding") or [] for item in candidates]
+        )
+        if query_embedding
+        else [0.0] * len(candidates)
+    )
+
     scored: list[RankedChunk] = []
-    for item in candidates:
+    for position, item in enumerate(candidates):
         lex, coverage = lexical_score(
             query, item.get("document_name", ""), item.get("text", ""), idf_map
         )
-        vector = 0.0
-        if query_embedding and item.get("embedding"):
-            vector = max(0.0, cosine_similarity(query_embedding, item["embedding"]))
+        vector = vector_scores[position] if position < len(vector_scores) else 0.0
         # 两道门槛只要过一道就行：要么词面命中够多，要么语义足够接近。
         # 两个都不过，说明这段资料多半和问题无关。
         if coverage < min_coverage and vector < min_vector_similarity:

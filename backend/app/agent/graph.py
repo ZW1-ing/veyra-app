@@ -12,12 +12,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, TypedDict
 
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
-from ..llm.base import ChatMessage, Usage
+from ..llm.base import ChatMessage, ToolCall, Usage
 from .prompts import build_system_prompt, extract_action
 from .tools import ToolRegistry
 
@@ -25,11 +26,51 @@ from .tools import ToolRegistry
 class AgentState(TypedDict, total=False):
     messages: list[dict[str, str]]
     steps: int
-    tool_name: str | None
-    tool_args: dict[str, Any]
+    # 待执行的工具调用：原生 function calling 与 JSON 协议都归一到这个形状
+    pending_calls: list[dict[str, Any]]
     final: str
     usage: dict[str, int]
     max_steps: int
+
+
+def _to_chat_messages(messages: list[dict[str, Any]]) -> list[ChatMessage]:
+    """把图状态里的消息转成模型层消息（携带原生工具调用需要的字段）。"""
+    converted: list[ChatMessage] = []
+    for message in messages:
+        raw_calls = message.get("tool_calls")
+        converted.append(
+            ChatMessage(
+                role=str(message.get("role", "user")),
+                content=str(message.get("content") or ""),
+                tool_calls=(
+                    [
+                        ToolCall(
+                            id=str(call.get("id") or ""),
+                            name=str(call.get("name") or ""),
+                            arguments=str(call.get("arguments") or "{}"),
+                        )
+                        for call in raw_calls
+                    ]
+                    if raw_calls
+                    else None
+                ),
+                tool_call_id=message.get("tool_call_id"),
+            )
+        )
+    return converted
+
+
+def _parse_args(raw: Any) -> dict[str, Any]:
+    """原生工具调用的参数是 JSON 字符串；解析不出来就返回空字典，让工具自己报参数错误。"""
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(str(raw))
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def build_agent_graph(
@@ -47,12 +88,19 @@ def build_agent_graph(
 
     async def agent_node(state: AgentState) -> AgentState:
         step_limit = state.get("max_steps", max_steps)
-        system_prompt = build_system_prompt(registry.specs_text(), step_limit, persona)
+        # 支持原生工具调用的后端就走 tools 参数；否则继续用 JSON 协议（兼容性更好）
+        supports_native = bool(getattr(provider, "supports_native_tools", False))
+        system_prompt = build_system_prompt(
+            registry.specs_text(), step_limit, persona, native_tools=supports_native
+        )
         messages = [ChatMessage(role="system", content=system_prompt)]
-        messages += [ChatMessage(role=m["role"], content=m["content"]) for m in state["messages"]]
+        messages += _to_chat_messages(state["messages"])
+
+        tools = registry.tool_specs() if supports_native else None
 
         writer = get_stream_writer()
         collected: list[str] = []
+        native_calls: list[ToolCall] = []
         usage = Usage(
             prompt_tokens=state.get("usage", {}).get("prompt_tokens", 0),
             completion_tokens=state.get("usage", {}).get("completion_tokens", 0),
@@ -61,10 +109,12 @@ def build_agent_graph(
         timed_out = False
         try:
             async with asyncio.timeout(timeout_seconds):
-                async for chunk in provider.stream(messages):
+                async for chunk in provider.stream(messages, tools=tools):
                     if chunk.delta:
                         collected.append(chunk.delta)
                         writer({"type": "token", "text": chunk.delta})
+                    if chunk.tool_calls:
+                        native_calls.extend(chunk.tool_calls)
                     if chunk.usage:
                         usage.prompt_tokens = max(usage.prompt_tokens, chunk.usage.prompt_tokens)
                         usage.completion_tokens += chunk.usage.completion_tokens
@@ -81,22 +131,49 @@ def build_agent_graph(
             return {
                 "messages": state["messages"],
                 "final": text,
-                "tool_name": None,
+                "pending_calls": [],
                 "usage": {
                     "prompt_tokens": usage.prompt_tokens,
                     "completion_tokens": usage.completion_tokens,
                 },
             }
 
-        action = extract_action(text)
+        # 原生工具调用优先；后端不支持时回退到 JSON 协议
+        calls: list[dict[str, Any]] = []
+        if native_calls:
+            calls = [
+                {"id": call.id, "name": call.name, "arguments": call.arguments}
+                for call in native_calls
+            ]
+        else:
+            action = extract_action(text)
+            if action:
+                calls = [
+                    {
+                        "id": f"call_{len(state.get('messages', []))}",
+                        "name": action["tool"],
+                        "arguments": json.dumps(action["args"], ensure_ascii=False),
+                    }
+                ]
+
         new_messages = list(state["messages"])
-        if action:
-            new_messages.append({"role": "assistant", "content": text})
-            writer({"type": "action", "tool": action["tool"], "args": action["args"]})
+        if calls:
+            assistant_message: dict[str, Any] = {"role": "assistant", "content": text}
+            if native_calls:
+                # 原生协议要求把 tool_calls 原样带回对话历史
+                assistant_message["tool_calls"] = calls
+            new_messages.append(assistant_message)
+            for call in calls:
+                writer(
+                    {
+                        "type": "action",
+                        "tool": call["name"],
+                        "args": _parse_args(call["arguments"]),
+                    }
+                )
             return {
                 "messages": new_messages,
-                "tool_name": action["tool"],
-                "tool_args": action["args"],
+                "pending_calls": calls,
                 "usage": {
                     "prompt_tokens": usage.prompt_tokens,
                     "completion_tokens": usage.completion_tokens,
@@ -106,7 +183,7 @@ def build_agent_graph(
         return {
             "messages": state["messages"],
             "final": text,
-            "tool_name": None,
+            "pending_calls": [],
             "usage": {
                 "prompt_tokens": usage.prompt_tokens,
                 "completion_tokens": usage.completion_tokens,
@@ -114,28 +191,31 @@ def build_agent_graph(
         }
 
     def tools_node(state: AgentState) -> AgentState:
-        name = state.get("tool_name") or ""
-        args = state.get("tool_args") or {}
-        ok, result = registry.run(name, args)
         writer = get_stream_writer()
-        writer({"type": "tool", "tool": name, "ok": ok, "result": result[:500]})
-
         messages = list(state["messages"])
-        messages.append(
-            {
-                "role": "tool",
-                "content": f"工具 {name} 返回：{result}",
-            }
-        )
+        for call in state.get("pending_calls") or []:
+            name = str(call.get("name") or "")
+            args = _parse_args(call.get("arguments"))
+            ok, result = registry.run(name, args)
+            writer({"type": "tool", "tool": name, "ok": ok, "result": result[:500]})
+            messages.append(
+                {
+                    "role": "tool",
+                    "content": result,
+                    "tool_call_id": call.get("id"),
+                }
+            )
+
         return {
             "messages": messages,
             "steps": state.get("steps", 0) + 1,
+            "pending_calls": [],
             "final": "",
             "usage": state.get("usage", {}),
         }
 
     def route(state: AgentState) -> str:
-        if state.get("tool_name"):
+        if state.get("pending_calls"):
             if state.get("steps", 0) >= state.get("max_steps", max_steps):
                 return "finish"
             return "tools"
@@ -148,7 +228,7 @@ def build_agent_graph(
         return {
             "messages": state["messages"],
             "final": "已达到工具调用步数上限，请基于当前信息作答。",
-            "tool_name": None,
+            "pending_calls": [],
             "usage": state.get("usage", {}),
         }
 

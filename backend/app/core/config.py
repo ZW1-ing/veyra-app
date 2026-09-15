@@ -1,8 +1,25 @@
 """集中配置：所有可调项都走环境变量，代码里不写死。"""
 
+import json
 from functools import lru_cache
 
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class ModelPrice(BaseModel):
+    """模型价格，单位是美元 / 百万 token。"""
+
+    prompt_per_million: float = Field(default=0.0, ge=0)
+    completion_per_million: float = Field(default=0.0, ge=0)
+
+
+class TenantQuota(BaseModel):
+    """租户的每日额度；0 表示不限制。"""
+
+    daily_tokens: int = Field(default=0, ge=0)
+    daily_cost: float = Field(default=0.0, ge=0)
+    model_tokens: dict[str, int] = Field(default_factory=dict)
 
 
 class Settings(BaseSettings):
@@ -10,6 +27,8 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # 复杂字段由下面的 validator 解析，空环境变量才能统一视为“未配置”
+        enable_decoding=False,
     )
 
     app_name: str = "Veyra Agent API"
@@ -20,6 +39,8 @@ class Settings(BaseSettings):
     api_keys: str = ""
     # 每个 key 每分钟允许的请求数；<=0 表示不限流
     rate_limit_per_minute: int = 120
+    # 多实例部署时配 Redis，让限流在实例间共享；留空则用进程内实现
+    redis_url: str = ""
 
     @property
     def api_key_set(self) -> set[str]:
@@ -36,6 +57,17 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "qwen2.5"
     llm_timeout_seconds: float = 60.0
+    # 可选：按模型记录单价，例如
+    # MODEL_PRICES={"qwen2.5":{"prompt_per_million":0.2,"completion_per_million":0.6}}
+    # 未配置的模型按 0 计费；本地 Ollama 保持不填即可。
+    model_prices: dict[str, ModelPrice] = Field(default_factory=dict)
+    # 可选：按 API Key 配置每日额度。key 使用原始 API Key，数据库仍只保存哈希。
+    # TENANT_QUOTAS={"key-a":{"daily_tokens":200000,"daily_cost":5,
+    #                          "model_tokens":{"qwen2.5":100000}}}
+    tenant_quotas: dict[str, TenantQuota] = Field(default_factory=dict)
+    default_tenant_quota: TenantQuota = Field(default_factory=TenantQuota)
+    # 每日额度按这个时区的自然日重置
+    quota_timezone: str = "Asia/Shanghai"
 
     # 向量化
     embedding_provider: str = "hash"  # hash | openai_compat
@@ -46,6 +78,8 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 6
     chunk_size: int = 500
     chunk_overlap: int = 80
+    # 知识库单文件上传上限（字节）。默认 10 MB：再大就该考虑先做离线预处理了
+    max_upload_bytes: int = 10 * 1024 * 1024
     agent_max_steps: int = 8
     # 单轮对话的整体超时（秒）：模型卡住时不能把请求无限挂着
     agent_timeout_seconds: float = 120.0
@@ -68,6 +102,24 @@ class Settings(BaseSettings):
     # 向量相似度门槛：词法覆盖率不达标但语义足够接近时，同样允许进入排序。
     # 否则「对话记录存在哪里」这类问法会被纯词法门槛挡掉，白瞎了语义嵌入。
     retrieval_min_vector_similarity: float = 0.55
+
+    @property
+    def pricing_configured(self) -> bool:
+        return bool(self.model_prices)
+
+    @field_validator("model_prices", "tenant_quotas", mode="before")
+    @classmethod
+    def empty_mapping_from_env(cls, value):
+        if value in (None, ""):
+            return {}
+        return json.loads(value) if isinstance(value, str) else value
+
+    @field_validator("default_tenant_quota", mode="before")
+    @classmethod
+    def empty_quota_from_env(cls, value):
+        if value in (None, ""):
+            return {}
+        return json.loads(value) if isinstance(value, str) else value
 
 
 @lru_cache

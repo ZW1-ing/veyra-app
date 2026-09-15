@@ -18,12 +18,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from app.core.config import Settings  # noqa: E402
 from app.db import models  # noqa: E402,F401  注册表结构
 from app.db.base import Base  # noqa: E402
 from app.kb.embedding import HashEmbedding, OpenAICompatEmbedding  # noqa: E402
 from app.kb.service import ingest_document, search_knowledge  # noqa: E402
+
+
+def _memory_engine():
+    """内存 SQLite + 单连接池。
+
+    检索与入库现在跑在线程池里（见 app/kb/service.py），而内存库的每个连接都是
+    一份独立的数据：不加 StaticPool 的话，工作线程拿到的是空库；
+    不加 check_same_thread=False 则会直接抛 ProgrammingError。
+    """
+    return create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 
 # 语料：刻意写成「问法和原文用词不一样」，这样才能测出语义检索是否真的有用，
 # 只会背关键词的词法检索在这个数据集上会明显吃亏。
@@ -181,7 +196,7 @@ async def evaluate(db: Session, embedding, settings: Settings) -> dict:
 
 async def evaluate_once(args) -> dict:
     settings = make_settings(args)
-    engine = create_engine("sqlite+pysqlite:///:memory:")
+    engine = _memory_engine()
     Base.metadata.create_all(engine)
     embedding = build_embedding(args)
 
@@ -196,7 +211,7 @@ async def sweep(args) -> None:
     如果扫完发现没有任何组合能同时满足「召回达标」和「零误召回」，
     这本身就是结论：瓶颈不在阈值，得先动嵌入模型或分块方式。
     """
-    engine = create_engine("sqlite+pysqlite:///:memory:")
+    engine = _memory_engine()
     Base.metadata.create_all(engine)
     embedding = build_embedding(args)
     scores = [0.03, 0.05, 0.08, 0.10, 0.15, 0.20, 0.25]
@@ -273,6 +288,18 @@ def main() -> None:
     parser.add_argument("--min-coverage", type=float, default=0.15)
     parser.add_argument("--min-vector-similarity", type=float, default=0.45)
     parser.add_argument("--sweep", action="store_true", help="扫描阈值组合，找更优工作点")
+    parser.add_argument(
+        "--min-recall",
+        type=float,
+        default=None,
+        help="召回低于该值时以退出码 1 结束（给 CI 当回归门禁用）",
+    )
+    parser.add_argument(
+        "--max-false-positive",
+        type=float,
+        default=None,
+        help="误召回高于该值时以退出码 1 结束",
+    )
     args = parser.parse_args()
 
     if args.sweep:
@@ -287,7 +314,7 @@ def main() -> None:
     print("-" * 78)
     for query, expected, rank, source_count in result["rows"]:
         if expected == "（应无结果）":
-            shown = f"召回 {source_count} 条" + ("（应为 0）" if source_count else " ✓")
+            shown = f"召回 {source_count} 条" + ("（应为 0）" if source_count else " 正确")
         else:
             shown = "未召回" if rank is None else f"第 {rank} 位"
         print(f"{query:<34}{expected:<20}{shown:>8}")
@@ -295,6 +322,18 @@ def main() -> None:
     print(f"recall@{args.top_k}：{result['recall']:.1%}（{result['answerable']} 个可回答问题）")
     print(f"MRR：{result['mrr']:.3f}")
     print(f"误召回率：{result['false_positive_rate']:.1%}（{result['unanswerable']} 个无答案问题）")
+
+    # 回归门禁：CI 里用离线 hash 嵌入跑，任何人改检索逻辑导致指标退化都会让流水线红
+    failures: list[str] = []
+    if args.min_recall is not None and result["recall"] < args.min_recall:
+        failures.append(f"recall {result['recall']:.1%} < 要求 {args.min_recall:.1%}")
+    if args.max_false_positive is not None and result["false_positive_rate"] > args.max_false_positive:
+        failures.append(
+            f"误召回 {result['false_positive_rate']:.1%} > 上限 {args.max_false_positive:.1%}"
+        )
+    if failures:
+        print("\n检索质量门禁未通过：" + "；".join(failures))
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

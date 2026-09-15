@@ -40,8 +40,7 @@ async def stream_agent(
     state = {
         "messages": history,
         "steps": 0,
-        "tool_name": None,
-        "tool_args": {},
+        "pending_calls": [],
         "final": "",
         "usage": {"prompt_tokens": 0, "completion_tokens": 0},
         "max_steps": max_steps,

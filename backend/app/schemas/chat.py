@@ -8,7 +8,7 @@ from .kb import SourceOut
 
 
 class ChatRequest(BaseModel):
-    session_id: str | None = None
+    session_id: str | None = Field(default=None, min_length=1, max_length=32)
     message: str = Field(min_length=1)
     use_knowledge: bool = True
     max_steps: int | None = Field(default=None, ge=1, le=16)
@@ -23,6 +23,8 @@ class ChatResponse(BaseModel):
     text: str
     steps: int
     usage: dict[str, int]
+    cost: float = 0.0
+    request_id: str = "-"
     mode: str = "single"
     sources: list[SourceOut] = []
     tool_calls: list[str] = []

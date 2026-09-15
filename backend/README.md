@@ -108,10 +108,18 @@ curl -X POST http://127.0.0.1:8000/chat \
 
 - 没有配置 `API_KEYS` 时接口完全开放，日志里会打一条警告提醒你：这套配置只适合本地
 - 超限返回 `429` 并带 `Retry-After`；限流按 key 计数，一个 key 被限不影响其它 key
+- 每个 Key 会映射成一个独立租户：会话、知识库和用量都按租户过滤，数据库不保存原始 Key
+- 可以按 Key 配置每日 token、费用和模型级 token 额度，超额返回 `429 + Retry-After`
 - `/health` 刻意不挂鉴权，否则容器编排没法探活
 
-限流是**进程内**的滑动窗口实现（`app/core/ratelimit.py`，零依赖零运维）。
-真要多实例部署时，把它换成基于 Redis 的实现即可，接口不用动。
+限流默认是进程内滑动窗口；配 `REDIS_URL` 后自动切到 Redis 有序集合实现，
+多实例共享同一份额度。Redis 启动时探测、运行期故障放行并告警。
+
+每个请求会生成或透传 `X-Request-ID`，日志自动带上该 ID 和请求耗时。
+模型调用完成后记录 prompt / completion token 与价格快照，用量页按模型和日期聚合。
+
+Prometheus 指标通过 `/metrics` 暴露，包含 HTTP 请求、首 token 延迟、模型耗时、token、
+成本、检索耗时与配额拒绝；该端点同样校验 `X-API-Key`。
 
 ## 知识库管理
 
@@ -339,7 +347,7 @@ swarm 计划解析（坏 JSON / 环依赖 / 成员上限 / 乱序依赖）、依
 维度不一致时的剔除、鉴权与限流、慢查询不阻塞事件循环、重复入库幂等、删除级联清理、
 超时保留半截输出、上下文 token 预算。
 
-测试用临时 SQLite + mock 模型，所以离线、快速（45 项约 7 秒）、不产生任何 API 费用。
+测试用临时 SQLite + mock 模型，所以离线、快速（77 项约 13 秒）、不产生任何 API 费用。
 CI 里另外会起一个真实的 MySQL 来跑 `alembic upgrade` 和 `alembic check`。
 
 ## 检索质量评估
@@ -398,7 +406,5 @@ ollama pull bge-m3
 
 - [ ] 向量索引：MySQL 9 社区版只有 `VECTOR` 类型，`DISTANCE()` 和向量索引是 HeatWave 才有的功能，
       所以现在是全量算余弦；几万块以内够用，再往上要么换 pgvector / Milvus，要么用 hnswlib 自建索引
-- [ ] 原生 function calling（当前走 JSON 协议，兼容性最好但没有利用模型的工具调用能力）
 - [ ] swarm 成员也能调工具（现在是纯文本产出）、成员级重试
-- [ ] 鉴权与限流（API Key、按用户配额）
-- [ ] 可观测性（结构化日志、每个请求的 trace、检索命中率看板）
+- [ ] 基于 Prometheus 数据做检索命中率和成本看板

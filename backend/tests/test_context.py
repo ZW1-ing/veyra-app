@@ -14,7 +14,7 @@ class SlowProvider:
     name = "slow"
     model = "slow-model"
 
-    async def stream(self, messages: Sequence[ChatMessage]):
+    async def stream(self, messages: Sequence[ChatMessage], tools: Sequence[object] | None = None):
         yield ChatChunk(delta="正在思考")
         await asyncio.sleep(10)
         yield ChatChunk(delta="永远不会到")

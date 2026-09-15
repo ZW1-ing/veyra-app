@@ -48,13 +48,16 @@ jobs:
         run: ruff check app tests scripts
       - name: 单元测试（pytest）
         run: pytest -q
+      - name: 检索评估（回归门禁，离线 hash 嵌入）
+        # 用离线嵌入跑同一套标注数据：改动检索逻辑导致召回下降或误召回上升就会红
+        run: python scripts/evaluate_retrieval.py --embedding hash --min-recall 0.85 --max-false-positive 0.6
       - name: 应用数据库迁移
         run: alembic upgrade head
       - name: 校验模型与迁移一致
         run: alembic check
 
   frontend:
-    name: 前端（类型检查 / lint）
+    name: 前端（类型检查 / lint / E2E）
     runs-on: ubuntu-latest
     env:
       # 关掉 Next 遥测：它会尝试写用户目录的配置文件，在部分环境里会因跨设备重命名而报错
@@ -77,3 +80,29 @@ jobs:
         run: npm run type-check
       - name: lint
         run: npm run lint
+      - name: 单元测试
+        run: npm test
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: 安装后端依赖（E2E 使用 mock 模型与 SQLite）
+        run: pip install -r ../backend/requirements.txt
+      - name: 安装 Playwright 浏览器
+        run: npx playwright install chromium --with-deps
+      - name: 浏览器端到端测试
+        run: npm run test:e2e
+        env:
+          E2E_PYTHON: python
+          CI: "true"
+
+  docker:
+    name: 容器镜像构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: 校验 compose 配置
+        run: docker compose -f backend/docker-compose.yml config
+      - name: 构建后端镜像
+        run: docker build -t veyra-backend:ci backend
