@@ -20,6 +20,9 @@ test.describe("会话", () => {
     await lastMessage.hover()
     await page.getByTitle("复制这条消息").last().click()
     await expectToast(page, "已复制到剪贴板")
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe("[mock] 收到：你好，Veyra")
 
     // 重新生成：回答被替换，但用户消息不变
     await lastMessage.hover()

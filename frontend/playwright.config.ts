@@ -37,6 +37,7 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${FRONTEND_PORT}`,
     launchOptions: CHROME ? { executablePath: CHROME } : {},
+    permissions: ["clipboard-read", "clipboard-write"],
     trace: "retain-on-failure",
     screenshot: "only-on-failure"
   },

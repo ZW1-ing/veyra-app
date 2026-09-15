@@ -401,10 +401,10 @@ export default function KnowledgeBasePage() {
               <div className="relative">
                 <IconSearch
                   size={14}
-                  className="text-muted-foreground absolute top-1/2 left-2.5 -translate-y-1/2"
+                  className="text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2"
                 />
                 <input
-                  className="border-input bg-background w-56 rounded-md border py-1.5 pr-3 pl-8 text-sm"
+                  className="border-input bg-background w-56 rounded-md border py-1.5 pl-8 pr-3 text-sm"
                   placeholder="按名称搜索文档"
                   value={nameFilter}
                   onChange={(e) => setNameFilter(e.target.value)}
@@ -491,7 +491,7 @@ export default function KnowledgeBasePage() {
                             <span className="text-muted-foreground">—</span>
                           )}
                         </td>
-                        <td className="text-muted-foreground px-3 py-2 text-xs whitespace-nowrap">
+                        <td className="text-muted-foreground whitespace-nowrap px-3 py-2 text-xs">
                           {new Date(document.created_at).toLocaleString("zh-CN", {
                             month: "2-digit",
                             day: "2-digit",
