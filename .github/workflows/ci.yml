@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: 后端（检查 / 测试 / 迁移）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    # 真起一个 MySQL：迁移必须在真实数据库上验证，SQLite 测不出 MySQL 特有的坑
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: veyra
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/veyra?charset=utf8mb4
+      LLM_PROVIDER: mock
+      EMBEDDING_PROVIDER: hash
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+      - name: 代码检查（ruff）
+        run: ruff check app tests scripts
+      - name: 单元测试（pytest）
+        run: pytest -q
+      - name: 应用数据库迁移
+        run: alembic upgrade head
+      - name: 校验模型与迁移一致
+        run: alembic check
+
+  frontend:
+    name: 前端（类型检查 / lint）
+    runs-on: ubuntu-latest
+    env:
+      # 关掉 Next 遥测：它会尝试写用户目录的配置文件，在部分环境里会因跨设备重命名而报错
+      NEXT_TELEMETRY_DISABLED: 1
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+      - name: 类型检查
+        run: npm run type-check
+      - name: lint
+        run: npm run lint

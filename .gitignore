@@ -1,0 +1,27 @@
+# 环境变量：一律不进版本库（两边都有各自的示例文件）
+.env
+.env.local
+.env.*.local
+
+# 前端（Next.js）
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+.eslintcache
+
+# 后端（Python）
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.db
+data/
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
