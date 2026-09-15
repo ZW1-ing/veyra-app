@@ -50,7 +50,8 @@ export default function KnowledgeBasePage() {
         cache: "no-store"
       })
       const body = await response.json()
-      if (!response.ok) throw new Error(body.message || `加载失败（HTTP ${response.status}）`)
+      if (!response.ok)
+        throw new Error(body.message || `加载失败（HTTP ${response.status}）`)
       setDocuments(body as DocumentItem[])
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败")
@@ -84,7 +85,9 @@ export default function KnowledgeBasePage() {
       const body = await response.json()
       if (!response.ok) {
         throw new Error(
-          typeof body.detail === "string" ? body.detail : body.message || `入库失败（HTTP ${response.status}）`
+          typeof body.detail === "string"
+            ? body.detail
+            : body.message || `入库失败（HTTP ${response.status}）`
         )
       }
       setNotice(
@@ -135,7 +138,8 @@ export default function KnowledgeBasePage() {
         body: JSON.stringify({ query: query.trim(), top_k: 5 })
       })
       const body = await response.json()
-      if (!response.ok) throw new Error(body.message || `检索失败（HTTP ${response.status}）`)
+      if (!response.ok)
+        throw new Error(body.message || `检索失败（HTTP ${response.status}）`)
       setHits(body as SearchHit[])
     } catch (e) {
       setError(e instanceof Error ? e.message : "检索失败")
@@ -152,15 +156,15 @@ export default function KnowledgeBasePage() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <header className="flex items-center justify-between border-b px-6 py-3">
+      <header className="veyra-panel border-border/70 flex items-center justify-between border-b px-6 py-3">
         <div>
           <h1 className="text-base font-semibold">知识库</h1>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground/75 text-xs">
             文档入库后会参与检索，回答里会带上 [S1] 这样的来源编号
           </p>
         </div>
         <button
-          className="border-input hover:bg-accent flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
+          className="veyra-btn-secondary flex items-center gap-1 px-3 py-1.5"
           onClick={() => void refresh()}
           disabled={loading}
         >
@@ -172,12 +176,12 @@ export default function KnowledgeBasePage() {
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mx-auto flex max-w-4xl flex-col gap-6">
           {error && (
-            <div className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm">
+            <div className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-3 py-2 text-sm">
               {error}
             </div>
           )}
           {notice && (
-            <div className="rounded-md border border-emerald-500/40 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
+            <div className="border-success/30 bg-success/10 text-success rounded-lg border px-3 py-2 text-sm">
               {notice}
             </div>
           )}
@@ -188,25 +192,25 @@ export default function KnowledgeBasePage() {
 
             <div className="flex flex-wrap items-center gap-2">
               <input
-                className="border-input bg-background min-w-[220px] flex-1 rounded-md border px-3 py-2 text-sm"
+                className="veyra-field min-w-[220px] flex-1 px-3 py-2"
                 placeholder="文档名，例如 产品手册.md"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={e => setName(e.target.value)}
               />
               <input
-                className="border-input bg-background w-40 rounded-md border px-3 py-2 text-sm"
+                className="veyra-field w-40 px-3 py-2"
                 placeholder="分块字数（可选）"
                 value={chunkSize}
-                onChange={(e) => setChunkSize(e.target.value)}
+                onChange={e => setChunkSize(e.target.value)}
               />
-              <label className="border-input hover:bg-accent flex cursor-pointer items-center gap-1 rounded-md border px-3 py-2 text-sm">
+              <label className="veyra-btn-secondary flex cursor-pointer items-center gap-1 px-3 py-2">
                 <IconUpload size={14} />
                 选择文件
                 <input
                   type="file"
                   accept=".txt,.md,.markdown,text/plain,text/markdown"
                   className="hidden"
-                  onChange={(e) => {
+                  onChange={e => {
                     const file = e.target.files?.[0]
                     if (file) void onPickFile(file)
                   }}
@@ -215,18 +219,18 @@ export default function KnowledgeBasePage() {
             </div>
 
             <textarea
-              className="border-input bg-background min-h-[160px] rounded-md border px-3 py-2 font-mono text-sm"
+              className="veyra-field min-h-[160px] px-3 py-2 font-mono"
               placeholder="粘贴文档内容，或点上面的「选择文件」导入 txt / markdown"
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={e => setText(e.target.value)}
             />
 
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground text-xs">
+              <span className="text-muted-foreground/75 text-xs">
                 分块小一点通常检索更准；留空则用后端默认值（500 字 / 重叠 80）
               </span>
               <button
-                className="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm disabled:opacity-50"
+                className="veyra-btn-primary px-4 py-2"
                 onClick={() => void ingest()}
                 disabled={loading || !name.trim() || !text.trim()}
               >
@@ -240,16 +244,16 @@ export default function KnowledgeBasePage() {
             <h2 className="text-sm font-semibold">检索调试</h2>
             <div className="flex items-center gap-2">
               <input
-                className="border-input bg-background flex-1 rounded-md border px-3 py-2 text-sm"
+                className="veyra-field flex-1 px-3 py-2"
                 placeholder="输入一个问题，看看会命中哪些片段"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => {
                   if (e.key === "Enter") void search()
                 }}
               />
               <button
-                className="border-input hover:bg-accent rounded-md border px-4 py-2 text-sm disabled:opacity-50"
+                className="veyra-btn-secondary px-4 py-2"
                 onClick={() => void search()}
                 disabled={searching || !query.trim()}
               >
@@ -260,13 +264,13 @@ export default function KnowledgeBasePage() {
             {hits !== null && (
               <div className="flex flex-col gap-2">
                 {hits.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">
+                  <p className="text-muted-foreground/75 text-sm">
                     没有命中任何片段（说明这个问题在知识库里找不到依据，回答时不会硬凑引用）
                   </p>
                 ) : (
-                  hits.map((hit) => (
-                    <div key={hit.id} className="rounded-md border px-3 py-2 text-sm">
-                      <div className="text-muted-foreground mb-1 flex items-center gap-2 text-xs">
+                  hits.map(hit => (
+                    <div key={hit.id} className="veyra-surface px-3 py-2">
+                      <div className="text-muted-foreground/75 mb-1 flex items-center gap-2 text-xs">
                         <span className="font-mono">[{hit.id}]</span>
                         <span>{hit.document_name}</span>
                         <span>第 {hit.chunk_index} 块</span>
@@ -282,36 +286,56 @@ export default function KnowledgeBasePage() {
 
           {/* 文档列表 */}
           <section className="flex flex-col gap-3">
-            <h2 className="text-sm font-semibold">已有文档（{documents.length}）</h2>
+            <h2 className="text-sm font-semibold">
+              已有文档（{documents.length}）
+            </h2>
             {documents.length === 0 ? (
-              <p className="text-muted-foreground text-sm">还没有文档，先在上面入库一篇。</p>
+              <p className="text-muted-foreground/75 text-sm">
+                还没有文档，先在上面入库一篇。
+              </p>
             ) : (
-              <div className="overflow-hidden rounded-md border">
+              <div className="border-border/70 overflow-hidden rounded-lg border">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/50 text-muted-foreground text-xs">
+                  <thead className="bg-muted/40 text-muted-foreground/75 text-xs">
                     <tr>
                       <th className="px-3 py-2 text-left font-medium">文档</th>
                       <th className="px-3 py-2 text-right font-medium">字数</th>
-                      <th className="px-3 py-2 text-right font-medium">块大小</th>
-                      <th className="px-3 py-2 text-left font-medium">嵌入模型</th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        块大小
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium">
+                        嵌入模型
+                      </th>
                       <th className="px-3 py-2" />
                     </tr>
                   </thead>
                   <tbody>
-                    {documents.map((document) => (
-                      <tr key={document.id} className="border-t">
-                        <td className="max-w-[280px] truncate px-3 py-2" title={document.name}>
+                    {documents.map(document => (
+                      <tr
+                        key={document.id}
+                        className="border-border/60 border-t"
+                      >
+                        <td
+                          className="max-w-[280px] truncate px-3 py-2"
+                          title={document.name}
+                        >
                           {document.name}
                         </td>
-                        <td className="px-3 py-2 text-right">{document.char_count}</td>
-                        <td className="px-3 py-2 text-right">{document.chunk_size || "默认"}</td>
+                        <td className="px-3 py-2 text-right">
+                          {document.char_count}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {document.chunk_size || "默认"}
+                        </td>
                         <td className="px-3 py-2">
                           {document.embedding_model || "—"}
-                          {document.embedding_dim ? ` · ${document.embedding_dim}维` : ""}
+                          {document.embedding_dim
+                            ? ` · ${document.embedding_dim}维`
+                            : ""}
                         </td>
                         <td className="px-3 py-2 text-right">
                           <button
-                            className="hover:bg-destructive/10 text-destructive rounded p-1"
+                            className="hover:bg-destructive/10 text-destructive rounded-md p-1"
                             title="删除该文档及其分块"
                             onClick={() => void remove(document)}
                           >

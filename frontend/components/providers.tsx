@@ -11,7 +11,13 @@ import { ReactNode } from "react"
  */
 export function Providers({ children }: { children: ReactNode }) {
   return (
-    <ThemeProvider attribute="class" defaultTheme="dark">
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="light"
+      enableSystem={false}
+      forcedTheme="light"
+      storageKey="veyra-theme"
+    >
       {children}
     </ThemeProvider>
   )
