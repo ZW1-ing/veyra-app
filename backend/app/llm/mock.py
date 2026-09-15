@@ -13,6 +13,8 @@ class MockProvider:
     """
 
     name = "mock"
+    # 假模型不走原生工具调用，让上层用 JSON 协议——这样离线也能覆盖那条分支
+    supports_native_tools = False
 
     def __init__(self, replies: Sequence[str] | None = None, model: str = "mock-assistant"):
         self.model = model
@@ -25,7 +27,11 @@ class MockProvider:
         last_user = next((m for m in reversed(messages) if m.role == "user"), None)
         return f"[mock] 收到：{last_user.content if last_user else ''}"
 
-    async def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[ChatChunk]:
+    async def stream(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[object] | None = None,
+    ) -> AsyncIterator[ChatChunk]:
         self.calls.append(list(messages))
         reply = self._next_reply(messages)
         # 每 8 个字符切一段，模拟真实的流式分片

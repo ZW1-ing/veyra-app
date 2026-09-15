@@ -1,6 +1,10 @@
 "use client"
 
-import { backendRequestHeaders, loadSettings } from "@/lib/local-chat/settings"
+import {
+  backendRequestHeaders,
+  backendUploadHeaders,
+  loadSettings
+} from "@/lib/local-chat/settings"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -154,12 +158,54 @@ export default function KnowledgeBasePage() {
     }
   }, [query])
 
-  const onPickFile = useCallback(async (file: File) => {
-    const content = await file.text()
-    setName(file.name)
-    setText(content)
-    toast.success(`已读取 ${file.name}（${content.length} 字），确认后点「入库」`)
-  }, [])
+  /** 二进制文档（PDF/DOCX）直接上传给后端解析；纯文本才读进下面的编辑框 */
+  const uploadBinary = useCallback(
+    async (file: File) => {
+      const form = new FormData()
+      form.append("file", file)
+      if (chunkSize) form.append("chunk_size", chunkSize)
+
+      toast.info(`正在解析 ${file.name}…`)
+      try {
+        const response = await fetch("/api/veyra/documents/upload", {
+          method: "POST",
+          headers: backendUploadHeaders(loadSettings()),
+          body: form
+        })
+        const body = await response.json()
+        if (!response.ok) {
+          throw new Error(
+            typeof body.detail === "string" ? body.detail : body.message || "上传失败"
+          )
+        }
+        toast.success(
+          body.deduplicated
+            ? `${file.name} 内容未变，后端复用了已有记录`
+            : `已入库：${body.name}（${body.char_count} 字，块大小 ${body.chunk_size}）`
+        )
+        await refresh()
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "上传失败")
+      }
+    },
+    [chunkSize, refresh]
+  )
+
+  const onPickFile = useCallback(
+    async (file: File) => {
+      const suffix = file.name.toLowerCase().slice(file.name.lastIndexOf("."))
+      if (suffix === ".pdf" || suffix === ".docx") {
+        // 二进制文件不能当文本读，交给后端解析
+        await uploadBinary(file)
+        return
+      }
+      const content = await file.text()
+      setName(file.name)
+      setText(content)
+      toast.success(`已读取 ${file.name}（${content.length} 字），确认后点「入库」`)
+    },
+    [uploadBinary]
+  )
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -208,14 +254,14 @@ export default function KnowledgeBasePage() {
                   }}
                 >
                   <IconUpload size={22} className="text-muted-foreground" />
-                  <p className="text-sm">把 txt / markdown 拖到这里，或点击选择文件</p>
+                  <p className="text-sm">把文件拖到这里，或点击选择</p>
                   <p className="text-muted-foreground text-xs">
-                    也可以直接在下面粘贴内容
+                    PDF / DOCX 会直接解析入库；txt / markdown 会读进下面的编辑框，确认后再入库
                   </p>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".txt,.md,.markdown,text/plain,text/markdown"
+                    accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf"
                     className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0]

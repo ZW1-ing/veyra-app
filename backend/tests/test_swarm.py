@@ -112,7 +112,7 @@ class RecordingProvider:
         finally:
             self.active -= 1
 
-    async def stream(self, messages: Sequence[ChatMessage]):
+    async def stream(self, messages: Sequence[ChatMessage], tools: Sequence[object] | None = None):
         yield ChatChunk(delta="汇总：")
         yield ChatChunk(delta="最终答复")
         yield ChatChunk(usage=Usage(20, 10))
@@ -173,7 +173,7 @@ class PlanThenAnswerProvider:
                 return f"{title}认为上限是八步。", Usage(12, 6)
         return "成员产出", Usage(12, 6)
 
-    async def stream(self, messages: Sequence[ChatMessage]):
+    async def stream(self, messages: Sequence[ChatMessage], tools: Sequence[object] | None = None):
         assert "成员产出" in messages[-1].content or "调研员" in messages[-1].content
         yield ChatChunk(delta="综合两位成员的意见，")
         yield ChatChunk(delta="工具调用上限是八步。[S1]")

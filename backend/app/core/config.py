@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 6
     chunk_size: int = 500
     chunk_overlap: int = 80
+    # 知识库单文件上传上限（字节）。默认 10 MB：再大就该考虑先做离线预处理了
+    max_upload_bytes: int = 10 * 1024 * 1024
     agent_max_steps: int = 8
     # 单轮对话的整体超时（秒）：模型卡住时不能把请求无限挂着
     agent_timeout_seconds: float = 120.0

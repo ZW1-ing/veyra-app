@@ -46,3 +46,11 @@ export function backendHeaders(target: BackendTarget): Record<string, string> {
   if (target.apiKey) headers["X-API-Key"] = target.apiKey
   return headers
 }
+
+/**
+ * 上传 multipart 时用这组头：**不能**手动设 Content-Type，
+ * 否则会丢掉 fetch 自动生成的 boundary，后端解析失败。
+ */
+export function backendAuthHeaders(target: BackendTarget): Record<string, string> {
+  return target.apiKey ? { "X-API-Key": target.apiKey } : {}
+}

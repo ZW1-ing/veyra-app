@@ -1,14 +1,25 @@
 """提示词模板：工具调用协议 + 引用规范都写在这里，方便单独迭代。"""
 
-TOOL_PROTOCOL = """需要调用工具时，只输出一行 JSON，不要输出别的文字：
+TOOL_PROTOCOL_JSON = """需要调用工具时，只输出一行 JSON，不要输出别的文字：
 {"tool": "工具名", "args": {"参数名": "参数值"}}
 
 拿到工具结果后，再决定是继续调用工具还是给出最终回答。
 不需要调用工具时，直接用中文回答用户。"""
 
+# 后端支持原生 function calling 时：工具通过接口的 tools 参数提供，
+# 不再要求模型输出 JSON（两套协议同时讲会让模型混乱，实测确实会输出 JSON 文本）。
+TOOL_PROTOCOL_NATIVE = """需要调用工具时，直接调用上面提供的工具；不需要时直接用中文回答用户。
+如果当前接口不支持工具调用，再退回输出一行 JSON：{"tool": "工具名", "args": {...}}"""
 
-def build_system_prompt(tool_specs: str, max_steps: int, persona: str | None = None) -> str:
+
+def build_system_prompt(
+    tool_specs: str,
+    max_steps: int,
+    persona: str | None = None,
+    native_tools: bool = False,
+) -> str:
     persona_block = f"\n角色设定（优先遵循）：\n{persona.strip()}\n" if persona and persona.strip() else ""
+    protocol = TOOL_PROTOCOL_NATIVE if native_tools else TOOL_PROTOCOL_JSON
 
     return f"""你是 Veyra 的 AI 助手，回答要准确、简洁，不确定时明确说明。
 {persona_block}
@@ -16,7 +27,7 @@ def build_system_prompt(tool_specs: str, max_steps: int, persona: str | None = N
 可用工具：
 {tool_specs}
 
-{TOOL_PROTOCOL}
+{protocol}
 
 约束：
 1. 最多调用 {max_steps} 步工具，超过就基于已有信息作答。
