@@ -5,6 +5,31 @@ import {
   type Assistant,
   type PromptTemplate
 } from "@/lib/local-chat/assistants"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { backendRequestHeaders, loadSettings } from "@/lib/local-chat/settings"
 import {
   createSession,
@@ -17,7 +42,14 @@ import {
   type LocalMessage,
   type LocalSession
 } from "@/lib/local-chat/store"
-import { IconDownload, IconPencil, IconPlus, IconTrash, IconX } from "@tabler/icons-react"
+import {
+  IconDownload,
+  IconDotsVertical,
+  IconPencil,
+  IconPlus,
+  IconTrash,
+  IconX
+} from "@tabler/icons-react"
 import dynamic from "next/dynamic"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -58,6 +90,7 @@ export default function LocalChatPage() {
   const [assistants, setAssistants] = useState<Assistant[]>([])
   const [prompts, setPrompts] = useState<PromptTemplate[]>([])
   const [assistantId, setAssistantId] = useState("")
+  const [pendingDelete, setPendingDelete] = useState<LocalSession | null>(null)
   const [hydrated, setHydrated] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -200,7 +233,8 @@ export default function LocalChatPage() {
   }, [active, assistantId, assistants, input, model, patchSession, streaming])
 
   return (
-    <div className="flex min-w-0 flex-1">
+    <TooltipProvider delayDuration={300}>
+      <div className="flex min-w-0 flex-1">
       {/* 会话列表 */}
       <aside className="flex w-64 shrink-0 flex-col border-r">
         <div className="flex items-center justify-between border-b px-3 py-3">
@@ -248,23 +282,39 @@ export default function LocalChatPage() {
                   >
                     {session.title}
                   </button>
-                  <button
-                    className="hover:bg-background rounded p-0.5 opacity-0 group-hover:opacity-100"
-                    title="重命名"
-                    onClick={() => {
-                      setRenamingId(session.id)
-                      setRenameValue(session.title)
-                    }}
-                  >
-                    <IconPencil size={13} />
-                  </button>
-                  <button
-                    className="hover:bg-background rounded p-0.5 opacity-0 group-hover:opacity-100"
-                    title="删除"
-                    onClick={() => removeSession(session.id)}
-                  >
-                    <IconTrash size={13} />
-                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className="hover:bg-background rounded p-0.5 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+                        title="更多操作"
+                      >
+                        <IconDotsVertical size={14} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-40">
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setRenamingId(session.id)
+                          setRenameValue(session.title)
+                        }}
+                      >
+                        <IconPencil size={14} className="mr-2" />
+                        重命名
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => exportSession(session)}>
+                        <IconDownload size={14} className="mr-2" />
+                        导出 Markdown
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onClick={() => setPendingDelete(session)}
+                      >
+                        <IconTrash size={14} className="mr-2" />
+                        删除
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </>
               )}
             </div>
@@ -287,47 +337,57 @@ export default function LocalChatPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <select
-              className="border-input bg-background max-w-[190px] rounded-md border px-3 py-1.5 text-sm"
-              value={assistantId}
-              onChange={(e) => {
-                const id = e.target.value
+            {/* Radix Select 不接受空字符串作为 value，所以「不使用助手」用 none 这个哨兵值 */}
+            <Select
+              value={assistantId || "none"}
+              onValueChange={(value) => {
+                const id = value === "none" ? "" : value
                 setAssistantId(id)
                 // 选中助手时同时切换它预设的模型档位
                 const picked = assistants.find((a) => a.id === id)
                 if (picked?.model) setModel(picked.model)
               }}
               disabled={streaming}
-              title="选择一个助手（角色设定会发给后端）"
             >
-              <option value="">不使用助手</option>
-              {assistants.map((assistant) => (
-                <option key={assistant.id} value={assistant.id}>
-                  {assistant.emoji} {assistant.name}
-                </option>
-              ))}
-            </select>
-            <select
-              className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              disabled={streaming}
-            >
-              {MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <button
-              className="border-input hover:bg-accent flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
-              onClick={() => active && exportSession(active)}
-              disabled={!active?.messages.length}
-              title="导出为 Markdown"
-            >
-              <IconDownload size={14} />
-              导出
-            </button>
+              <SelectTrigger className="w-[190px]" title="选择一个助手（角色设定会发给后端）">
+                <SelectValue placeholder="不使用助手" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">不使用助手</SelectItem>
+                {assistants.map((assistant) => (
+                  <SelectItem key={assistant.id} value={assistant.id}>
+                    {assistant.emoji} {assistant.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={model} onValueChange={setModel} disabled={streaming}>
+              <SelectTrigger className="w-[210px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MODELS.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="border-input hover:bg-accent flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
+                  onClick={() => active && exportSession(active)}
+                  disabled={!active?.messages.length}
+                >
+                  <IconDownload size={14} />
+                  导出
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>把当前会话导出成 Markdown 文件</TooltipContent>
+            </Tooltip>
           </div>
         </header>
 
@@ -412,6 +472,35 @@ export default function LocalChatPage() {
           </div>
         </footer>
       </div>
-    </div>
+      </div>
+
+      {/* 删除会话前确认：会话存在浏览器里，删掉就找不回来了 */}
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除这个会话？</AlertDialogTitle>
+            <AlertDialogDescription>
+              「{pendingDelete?.title}」里的对话记录会从这台浏览器移除，无法恢复。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingDelete) removeSession(pendingDelete.id)
+                setPendingDelete(null)
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </TooltipProvider>
   )
 }

@@ -1,8 +1,20 @@
 "use client"
 
 import { backendRequestHeaders, loadSettings } from "@/lib/local-chat/settings"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
 import { IconRefresh, IconTrash, IconUpload } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
+import { toast } from "sonner"
 
 /**
  * 知识库管理：把文档灌进后端（backend/ 的 /kb/documents），并管理已有文档。
@@ -34,8 +46,7 @@ export default function KnowledgeBasePage() {
   const [text, setText] = useState("")
   const [chunkSize, setChunkSize] = useState("")
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const [notice, setNotice] = useState("")
+  const [pendingDelete, setPendingDelete] = useState<DocumentItem | null>(null)
 
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<SearchHit[] | null>(null)
@@ -43,7 +54,6 @@ export default function KnowledgeBasePage() {
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    setError("")
     try {
       const response = await fetch("/api/veyra/documents", {
         headers: backendRequestHeaders(loadSettings()),
@@ -53,7 +63,7 @@ export default function KnowledgeBasePage() {
       if (!response.ok) throw new Error(body.message || `加载失败（HTTP ${response.status}）`)
       setDocuments(body as DocumentItem[])
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载失败")
+      toast.error(e instanceof Error ? e.message : "加载失败")
     } finally {
       setLoading(false)
     }
@@ -66,8 +76,6 @@ export default function KnowledgeBasePage() {
   const ingest = useCallback(async () => {
     if (!name.trim() || !text.trim()) return
     setLoading(true)
-    setError("")
-    setNotice("")
     try {
       const payload: Record<string, unknown> = { name: name.trim(), text }
       const size = Number(chunkSize)
@@ -87,7 +95,7 @@ export default function KnowledgeBasePage() {
           typeof body.detail === "string" ? body.detail : body.message || `入库失败（HTTP ${response.status}）`
         )
       }
-      setNotice(
+      toast.success(
         body.deduplicated
           ? "内容与配置都没变，后端复用了已有记录（没有重复入库）"
           : `已入库：${body.name}（${body.char_count} 字，块大小 ${body.chunk_size}，模型 ${body.embedding_model}）`
@@ -96,7 +104,7 @@ export default function KnowledgeBasePage() {
       setText("")
       await refresh()
     } catch (e) {
-      setError(e instanceof Error ? e.message : "入库失败")
+      toast.error(e instanceof Error ? e.message : "入库失败")
     } finally {
       setLoading(false)
     }
@@ -104,8 +112,6 @@ export default function KnowledgeBasePage() {
 
   const remove = useCallback(
     async (document: DocumentItem) => {
-      setError("")
-      setNotice("")
       try {
         const response = await fetch(`/api/veyra/documents/${document.id}`, {
           method: "DELETE",
@@ -115,10 +121,10 @@ export default function KnowledgeBasePage() {
           const body = await response.json().catch(() => ({ message: "" }))
           throw new Error(body.message || `删除失败（HTTP ${response.status}）`)
         }
-        setNotice(`已删除：${document.name}`)
+        toast.success(`已删除：${document.name}`)
         await refresh()
       } catch (e) {
-        setError(e instanceof Error ? e.message : "删除失败")
+        toast.error(e instanceof Error ? e.message : "删除失败")
       }
     },
     [refresh]
@@ -127,7 +133,6 @@ export default function KnowledgeBasePage() {
   const search = useCallback(async () => {
     if (!query.trim()) return
     setSearching(true)
-    setError("")
     try {
       const response = await fetch("/api/veyra/search", {
         method: "POST",
@@ -138,7 +143,7 @@ export default function KnowledgeBasePage() {
       if (!response.ok) throw new Error(body.message || `检索失败（HTTP ${response.status}）`)
       setHits(body as SearchHit[])
     } catch (e) {
-      setError(e instanceof Error ? e.message : "检索失败")
+      toast.error(e instanceof Error ? e.message : "检索失败")
     } finally {
       setSearching(false)
     }
@@ -171,17 +176,6 @@ export default function KnowledgeBasePage() {
 
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mx-auto flex max-w-4xl flex-col gap-6">
-          {error && (
-            <div className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm">
-              {error}
-            </div>
-          )}
-          {notice && (
-            <div className="rounded-md border border-emerald-500/40 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
-              {notice}
-            </div>
-          )}
-
           {/* 入库 */}
           <section className="flex flex-col gap-3">
             <h2 className="text-sm font-semibold">新增文档</h2>
@@ -306,14 +300,20 @@ export default function KnowledgeBasePage() {
                         <td className="px-3 py-2 text-right">{document.char_count}</td>
                         <td className="px-3 py-2 text-right">{document.chunk_size || "默认"}</td>
                         <td className="px-3 py-2">
-                          {document.embedding_model || "—"}
-                          {document.embedding_dim ? ` · ${document.embedding_dim}维` : ""}
+                          {document.embedding_model ? (
+                            <Badge variant="secondary" className="font-mono text-[11px]">
+                              {document.embedding_model}
+                              {document.embedding_dim ? ` · ${document.embedding_dim}维` : ""}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right">
                           <button
                             className="hover:bg-destructive/10 text-destructive rounded p-1"
                             title="删除该文档及其分块"
-                            onClick={() => void remove(document)}
+                            onClick={() => setPendingDelete(document)}
                           >
                             <IconTrash size={15} />
                           </button>
@@ -327,6 +327,35 @@ export default function KnowledgeBasePage() {
           </section>
         </div>
       </div>
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除这篇文档？</AlertDialogTitle>
+            <AlertDialogDescription>
+              「{pendingDelete?.name}」及其全部 {pendingDelete ? "分块" : ""}
+              会从知识库移除，之后提问不会再引用到它。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = pendingDelete
+                setPendingDelete(null)
+                if (target) void remove(target)
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
