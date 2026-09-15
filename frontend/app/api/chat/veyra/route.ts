@@ -125,6 +125,7 @@ export async function POST(request: Request) {
     const json = await request.json()
     messages = (json.messages ?? []) as IncomingMessage[]
     model = String(json.chatSettings?.model ?? "")
+    const systemPrompt = typeof json.system_prompt === "string" ? json.system_prompt : undefined
 
     const question = lastUserMessage(messages)
     if (!question) {
@@ -142,7 +143,9 @@ export async function POST(request: Request) {
         // 模型名决定编排方式：蜂群档位走多智能体，其余走单智能体
         mode: model.includes("swarm") ? "swarm" : "single",
         use_knowledge: true,
-        session_id: toBackendSessionId(messages)
+        session_id: toBackendSessionId(messages),
+        // 前端选中的助手/提示词：后端会拼进系统提示词
+        system_prompt: systemPrompt
       }),
       signal: request.signal
     })

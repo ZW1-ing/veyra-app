@@ -1,12 +1,13 @@
 "use client"
 
-import { IconDatabase, IconMessage, IconSettings } from "@tabler/icons-react"
+import { IconDatabase, IconMessage, IconSettings, IconUsers } from "@tabler/icons-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ReactNode } from "react"
 
 const NAV = [
   { href: "/local", label: "会话", icon: IconMessage },
+  { href: "/local/assistants", label: "助手", icon: IconUsers },
   { href: "/local/kb", label: "知识库", icon: IconDatabase },
   { href: "/local/settings", label: "设置", icon: IconSettings }
 ]

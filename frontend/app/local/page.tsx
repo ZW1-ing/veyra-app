@@ -1,6 +1,11 @@
 "use client"
 
 import { MessageMarkdown } from "@/components/messages/message-markdown"
+import {
+  loadAssistants,
+  type Assistant,
+  type PromptTemplate
+} from "@/lib/local-chat/assistants"
 import { backendRequestHeaders, loadSettings } from "@/lib/local-chat/settings"
 import {
   createSession,
@@ -36,6 +41,9 @@ export default function LocalChatPage() {
   const [error, setError] = useState("")
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
+  const [assistants, setAssistants] = useState<Assistant[]>([])
+  const [prompts, setPrompts] = useState<PromptTemplate[]>([])
+  const [assistantId, setAssistantId] = useState("")
   const [hydrated, setHydrated] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -44,6 +52,11 @@ export default function LocalChatPage() {
     // 新会话的默认模式来自设置页
     const settings = loadSettings()
     if (settings.defaultModel) setModel(settings.defaultModel)
+
+    // 助手与提示词模板来自 /local/assistants 页的配置
+    const configured = loadAssistants()
+    setAssistants(configured.assistants)
+    setPrompts(configured.prompts)
 
     const loaded = loadState()
     if (loaded.sessions.length === 0) {
@@ -120,6 +133,7 @@ export default function LocalChatPage() {
     const assistantMessage: LocalMessage = { id: newId(), role: "assistant", content: "" }
     const history = [...active.messages, userMessage]
     const sessionId = active.id
+    const assistant = assistants.find((a) => a.id === assistantId)
 
     patchSession(sessionId, (session) => ({
       ...session,
@@ -139,6 +153,7 @@ export default function LocalChatPage() {
         headers: backendRequestHeaders(loadSettings()),
         body: JSON.stringify({
           chatSettings: { model, temperature: 0.5 },
+          system_prompt: assistant?.systemPrompt || undefined,
           // 首条消息的 id 决定后端会话，从而决定多轮上下文
           messages: history.map((m) => ({ id: m.id, role: m.role, content: m.content }))
         })
@@ -168,7 +183,7 @@ export default function LocalChatPage() {
     } finally {
       setStreaming(false)
     }
-  }, [active, input, model, patchSession, streaming])
+  }, [active, assistantId, assistants, input, model, patchSession, streaming])
 
   return (
     <div className="flex min-w-0 flex-1">
@@ -259,6 +274,26 @@ export default function LocalChatPage() {
 
           <div className="flex items-center gap-2">
             <select
+              className="border-input bg-background max-w-[190px] rounded-md border px-3 py-1.5 text-sm"
+              value={assistantId}
+              onChange={(e) => {
+                const id = e.target.value
+                setAssistantId(id)
+                // 选中助手时同时切换它预设的模型档位
+                const picked = assistants.find((a) => a.id === id)
+                if (picked?.model) setModel(picked.model)
+              }}
+              disabled={streaming}
+              title="选择一个助手（角色设定会发给后端）"
+            >
+              <option value="">不使用助手</option>
+              {assistants.map((assistant) => (
+                <option key={assistant.id} value={assistant.id}>
+                  {assistant.emoji} {assistant.name}
+                </option>
+              ))}
+            </select>
+            <select
               className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
               value={model}
               onChange={(e) => setModel(e.target.value)}
@@ -320,6 +355,25 @@ export default function LocalChatPage() {
         </main>
 
         <footer className="border-t px-6 py-4">
+          {prompts.length > 0 && (
+            <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-1.5">
+              {prompts.map((prompt) => (
+                <button
+                  key={prompt.id}
+                  className="border-input text-muted-foreground hover:bg-accent hover:text-foreground rounded-full border px-2.5 py-1 text-xs"
+                  title={prompt.content}
+                  onClick={() =>
+                    setInput((current) =>
+                      current.trim() ? `${current.trim()}\n${prompt.content}` : prompt.content
+                    )
+                  }
+                >
+                  {prompt.name}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="mx-auto flex max-w-3xl items-end gap-3">
             <textarea
               className="border-input bg-background min-h-[44px] flex-1 resize-none rounded-md border px-3 py-2 text-sm"

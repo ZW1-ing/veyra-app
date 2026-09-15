@@ -37,6 +37,7 @@ def build_agent_graph(
     registry: ToolRegistry,
     max_steps: int = 8,
     timeout_seconds: float = 120.0,
+    persona: str | None = None,
     checkpointer=None,
 ):
     """编译一张可执行的图。
@@ -46,7 +47,7 @@ def build_agent_graph(
 
     async def agent_node(state: AgentState) -> AgentState:
         step_limit = state.get("max_steps", max_steps)
-        system_prompt = build_system_prompt(registry.specs_text(), step_limit)
+        system_prompt = build_system_prompt(registry.specs_text(), step_limit, persona)
         messages = [ChatMessage(role="system", content=system_prompt)]
         messages += [ChatMessage(role=m["role"], content=m["content"]) for m in state["messages"]]
 

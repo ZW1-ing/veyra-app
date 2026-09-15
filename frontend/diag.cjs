@@ -1,0 +1,17 @@
+﻿const { chromium } = require("playwright")
+;(async () => {
+  const b = await chromium.launch({ executablePath: process.env.LOCAL_CHROME || "C:\\Users\\21467\\AppData\\Local\\ms-playwright\\chromium-1223\\chrome-win64\\chrome.exe" })
+  const p = await b.newPage()
+  const logs = []
+  p.on("pageerror", e => logs.push("pageerror: " + e.message))
+  p.on("console", m => { if (m.type() === "error") logs.push("console: " + m.text()) })
+  await p.goto("http://localhost:3000/local/assistants", { waitUntil: "networkidle" })
+  await p.waitForTimeout(3000)
+  const text = await p.locator("body").innerText()
+  console.log("=== 错误 ===")
+  console.log(logs.length ? logs.join("\n") : "（无）")
+  console.log("=== 页面文本前 400 字 ===")
+  console.log(text.slice(0, 400))
+  console.log("=== 包含面试官模拟 ===", text.includes("面试官模拟"))
+  await b.close()
+})()

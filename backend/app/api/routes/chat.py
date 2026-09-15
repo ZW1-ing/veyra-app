@@ -111,6 +111,7 @@ async def chat_stream(
                 knowledge=knowledge,
                 max_steps=max_steps,
                 settings=settings,
+                system_prompt=payload.system_prompt,
             )
             async for event in stream:
                 if event["type"] == "token":
@@ -190,6 +191,7 @@ async def chat_once(
         knowledge=knowledge,
         max_steps=max_steps,
         settings=settings,
+        system_prompt=payload.system_prompt,
     )
     async for event in stream:
         if event["type"] == "token":

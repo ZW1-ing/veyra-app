@@ -18,13 +18,15 @@ def stream_dialogue(
     knowledge: str,
     max_steps: int,
     settings: Settings,
+    system_prompt: str | None = None,
 ) -> AsyncIterator[dict]:
     if mode == "swarm":
-        return stream_swarm(provider, question, knowledge, settings)
+        return stream_swarm(provider, question, knowledge, settings, system_prompt)
     return stream_agent(
         provider,
         registry,
         context,
         max_steps=max_steps,
         timeout_seconds=settings.agent_timeout_seconds,
+        system_prompt=system_prompt,
     )

@@ -7,8 +7,11 @@ TOOL_PROTOCOL = """需要调用工具时，只输出一行 JSON，不要输出�
 不需要调用工具时，直接用中文回答用户。"""
 
 
-def build_system_prompt(tool_specs: str, max_steps: int) -> str:
+def build_system_prompt(tool_specs: str, max_steps: int, persona: str | None = None) -> str:
+    persona_block = f"\n角色设定（优先遵循）：\n{persona.strip()}\n" if persona and persona.strip() else ""
+
     return f"""你是 Veyra 的 AI 助手，回答要准确、简洁，不确定时明确说明。
+{persona_block}
 
 可用工具：
 {tool_specs}

@@ -38,8 +38,11 @@ class TaskResult:
     error: str = ""
 
 
-def build_plan_prompt(question: str, max_members: int) -> str:
+def build_plan_prompt(question: str, max_members: int, persona: str | None = None) -> str:
+    persona_block = f"\n角色设定（优先遵循）：{persona.strip()}\n" if persona and persona.strip() else ""
+
     return f"""你是任务规划器。把下面的任务拆成最多 {max_members} 个可由不同角色独立完成的子任务。
+{persona_block}
 
 只输出 JSON，不要输出任何其他文字，格式：
 {{"tasks": [
@@ -161,8 +164,11 @@ def build_member_prompt(
     task: PlanTask,
     upstream: Sequence[TaskResult],
     knowledge: str = "",
+    persona: str | None = None,
 ) -> list[ChatMessage]:
     context_parts = [f"整体任务：{question}", f"你负责的子任务：{task.task}"]
+    if persona and persona.strip():
+        context_parts.append(f"角色设定（优先遵循）：{persona.strip()}")
     if upstream:
         context_parts.append("其他成员的产出（供参考，不要重复他们的工作）：")
         context_parts.extend(f"【{item.title}】{item.output}" for item in upstream)
@@ -181,6 +187,7 @@ async def run_members(
     tasks: Sequence[PlanTask],
     knowledge: str,
     settings: Settings,
+    persona: str | None = None,
 ) -> AsyncIterator[dict]:
     """依赖感知调度：就绪的任务并发跑，完成的产出注入下游。
 
@@ -192,7 +199,7 @@ async def run_members(
 
     async def run_one(task: PlanTask) -> TaskResult:
         upstream = [results[dep] for dep in task.depends_on if dep in results]
-        messages = build_member_prompt(question, task, upstream, knowledge)
+        messages = build_member_prompt(question, task, upstream, knowledge, persona)
         async with semaphore:
             try:
                 text, _usage = await asyncio.wait_for(
@@ -269,8 +276,11 @@ def build_summary_prompt(
     question: str,
     results: Sequence[TaskResult],
     knowledge: str = "",
+    persona: str | None = None,
 ) -> list[ChatMessage]:
     parts = [f"用户任务：{question}", "各成员产出："]
+    if persona and persona.strip():
+        parts.insert(1, f"角色设定（优先遵循）：{persona.strip()}")
     for item in results:
         body = item.output if item.ok else f"（该成员失败：{item.error}）"
         parts.append(f"【{item.title}】{body}")
@@ -293,10 +303,16 @@ async def stream_swarm(
     question: str,
     knowledge: str,
     settings: Settings,
+    system_prompt: str | None = None,
 ) -> AsyncIterator[dict]:
     """完整流程：规划 → 执行成员 → 汇总，逐段产出事件。"""
     plan_text, plan_usage = await provider.complete(
-        [ChatMessage(role="user", content=build_plan_prompt(question, settings.swarm_max_members))]
+        [
+            ChatMessage(
+                role="user",
+                content=build_plan_prompt(question, settings.swarm_max_members, system_prompt),
+            )
+        ]
     )
     tasks, note = parse_plan(plan_text, question, settings.swarm_max_members)
 
@@ -308,14 +324,16 @@ async def stream_swarm(
 
     usage = Usage(plan_usage.prompt_tokens, plan_usage.completion_tokens)
     results: list[TaskResult] = []
-    async for event in run_members(provider, question, tasks, knowledge, settings):
+    async for event in run_members(provider, question, tasks, knowledge, settings, system_prompt):
         if event["type"] == "members_done":
             results = [TaskResult(**item) for item in event["results"]]
             continue
         yield event
 
     collected: list[str] = []
-    async for chunk in provider.stream(build_summary_prompt(question, results, knowledge)):
+    async for chunk in provider.stream(
+        build_summary_prompt(question, results, knowledge, system_prompt)
+    ):
         if chunk.delta:
             collected.append(chunk.delta)
             yield {"type": "token", "text": chunk.delta}

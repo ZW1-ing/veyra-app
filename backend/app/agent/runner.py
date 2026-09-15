@@ -22,6 +22,7 @@ async def stream_agent(
     history: list[dict[str, str]],
     max_steps: int = 8,
     timeout_seconds: float = 120.0,
+    system_prompt: str | None = None,
     checkpointer=None,
 ) -> AsyncIterator[dict]:
     """逐步产出事件：token / action / tool / final。
@@ -33,6 +34,7 @@ async def stream_agent(
         registry,
         max_steps=max_steps,
         timeout_seconds=timeout_seconds,
+        persona=system_prompt,
         checkpointer=checkpointer,
     )
     state = {
