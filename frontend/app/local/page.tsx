@@ -30,6 +30,16 @@ import {
   SelectValue
 } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  CommandShortcut
+} from "@/components/ui/command"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { backendRequestHeaders, loadSettings } from "@/lib/local-chat/settings"
 import {
@@ -44,15 +54,24 @@ import {
   type LocalSession
 } from "@/lib/local-chat/store"
 import {
+  IconChartBar,
+  IconCopy,
+  IconDatabase,
   IconDownload,
   IconDotsVertical,
+  IconMessage,
   IconPencil,
   IconPlus,
+  IconRefresh,
+  IconSettings,
   IconTrash,
+  IconUsers,
   IconX
 } from "@tabler/icons-react"
 import dynamic from "next/dynamic"
+import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
 
 /**
  * 本地模式对话页：不依赖 Supabase，也不需要登录。
@@ -81,6 +100,7 @@ const MessageMarkdown = dynamic(
 )
 
 export default function LocalChatPage() {
+  const router = useRouter()
   const [state, setState] = useState<LocalChatState>({ sessions: [], activeId: null })
   const [input, setInput] = useState("")
   const [model, setModel] = useState(MODELS[0].id)
@@ -173,8 +193,10 @@ export default function LocalChatPage() {
     URL.revokeObjectURL(url)
   }, [])
 
-  const send = useCallback(async () => {
-    const question = input.trim()
+  /** 发送一轮对话。override 用于「重新生成」：直接用上一条用户消息重跑，不经输入框。 */
+  const send = useCallback(
+    async (override?: string) => {
+    const question = (override ?? input).trim()
     if (!question || streaming || !active) return
 
     const userMessage: LocalMessage = { id: newId(), role: "user", content: question }
@@ -231,7 +253,61 @@ export default function LocalChatPage() {
     } finally {
       setStreaming(false)
     }
-  }, [active, assistantId, assistants, input, model, patchSession, streaming])
+    },
+    [active, assistantId, assistants, input, model, patchSession, streaming]
+  )
+
+  /**
+   * 重新生成：删掉这条回答，用它上面的用户提问重跑一轮。
+   * 用户消息保持原样，这样会话历史里的上下文不会乱。
+   */
+  const regenerate = useCallback(
+    async (assistantMessageId: string) => {
+      if (streaming || !active) return
+      const index = active.messages.findIndex((m) => m.id === assistantMessageId)
+      if (index < 0) return
+
+      const question = [...active.messages.slice(0, index)]
+        .reverse()
+        .find((m) => m.role === "user")?.content
+      if (!question) return
+
+      patchSession(active.id, (session) => ({
+        ...session,
+        messages: session.messages.slice(0, index)
+      }))
+      await send(question)
+    },
+    [active, patchSession, send, streaming]
+  )
+
+  const copyMessage = useCallback(async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content)
+      toast.success("已复制到剪贴板")
+    } catch {
+      toast.error("复制失败，请手动选择文本")
+    }
+  }, [])
+
+  /** 快捷键：⌘/Ctrl+K 打开会话面板，⌘/Ctrl+N 新建会话 */
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey
+      if (modifier && event.key.toLowerCase() === "k") {
+        event.preventDefault()
+        setPaletteOpen((open) => !open)
+      }
+      if (modifier && event.key.toLowerCase() === "n") {
+        event.preventDefault()
+        addSession()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [addSession])
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -240,14 +316,23 @@ export default function LocalChatPage() {
       <aside className="flex w-64 shrink-0 flex-col border-r">
         <div className="flex items-center justify-between border-b px-3 py-3">
           <span className="text-sm font-semibold">Veyra 本地模式</span>
-          <button
-            className="hover:bg-accent rounded-md p-1 disabled:opacity-50"
-            onClick={addSession}
-            title="新对话"
-            disabled={streaming}
-          >
-            <IconPlus size={16} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              className="text-muted-foreground hover:bg-accent rounded px-1.5 py-0.5 text-[10px]"
+              onClick={() => setPaletteOpen(true)}
+              title="会话搜索与跳转（⌘/Ctrl + K）"
+            >
+              ⌘K
+            </button>
+            <button
+              className="hover:bg-accent rounded-md p-1 disabled:opacity-50"
+              onClick={addSession}
+              title="新对话（⌘/Ctrl + N）"
+              disabled={streaming}
+            >
+              <IconPlus size={16} />
+            </button>
+          </div>
         </div>
 
         <ScrollArea className="flex-1">
@@ -398,16 +483,44 @@ export default function LocalChatPage() {
         <main className="px-6 py-6">
           <div className="mx-auto flex max-w-3xl flex-col gap-6">
             {!active?.messages.length && (
-              <p className="text-muted-foreground text-sm">
-                问点什么吧。回答会自动带上知识库来源（形如 [S1]）。
-              </p>
+              <div className="flex flex-col items-center gap-2 py-12 text-center">
+                <IconMessage size={28} className="text-muted-foreground" />
+                <p className="text-sm font-medium">开始一段新对话</p>
+                <p className="text-muted-foreground max-w-md text-xs leading-relaxed">
+                  回答会自动带上知识库来源（形如 [S1]）；顶部可以切换助手与模型档位，
+                  按 ⌘/Ctrl + K 能快速在会话之间跳转。
+                </p>
+              </div>
             )}
 
             {active?.messages.map((message) => (
-              <div key={message.id} className="flex flex-col gap-1">
-                <span className="text-muted-foreground text-xs">
-                  {message.role === "user" ? "你" : "Veyra"}
-                </span>
+              <div key={message.id} className="group/message flex flex-col gap-1">
+                <div className="flex h-5 items-center gap-2">
+                  <span className="text-muted-foreground text-xs">
+                    {message.role === "user" ? "你" : "Veyra"}
+                  </span>
+                  {/* 悬停才出现操作，避免平时干扰阅读 */}
+                  {message.content && !streaming && (
+                    <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover/message:opacity-100">
+                      <button
+                        className="hover:bg-accent rounded p-0.5"
+                        title="复制这条消息"
+                        onClick={() => void copyMessage(message.content)}
+                      >
+                        <IconCopy size={13} />
+                      </button>
+                      {message.role === "assistant" && (
+                        <button
+                          className="hover:bg-accent rounded p-0.5"
+                          title="用同一个提问重新生成"
+                          onClick={() => void regenerate(message.id)}
+                        >
+                          <IconRefresh size={13} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div className="text-sm leading-relaxed">
                   {message.role === "assistant" ? (
                     message.content ? (
@@ -480,6 +593,62 @@ export default function LocalChatPage() {
       </div>
 
       {/* 删除会话前确认：会话存在浏览器里，删掉就找不回来了 */}
+      {/* 会话搜索与页面跳转：⌘/Ctrl + K */}
+      <CommandDialog open={paletteOpen} onOpenChange={setPaletteOpen}>
+        <CommandInput placeholder="搜索会话，或跳到某个页面…" />
+        <CommandList>
+          <CommandEmpty>没有匹配的内容</CommandEmpty>
+
+          <CommandGroup heading="会话">
+            {state.sessions.map((session) => (
+              <CommandItem
+                key={session.id}
+                value={`${session.title} ${session.id}`}
+                onSelect={() => {
+                  setState((current) => ({ ...current, activeId: session.id }))
+                  setPaletteOpen(false)
+                }}
+              >
+                <IconMessage size={14} className="mr-2" />
+                <span className="truncate">{session.title}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+
+          <CommandSeparator />
+
+          <CommandGroup heading="操作">
+            <CommandItem
+              onSelect={() => {
+                addSession()
+                setPaletteOpen(false)
+              }}
+            >
+              <IconPlus size={14} className="mr-2" />
+              新建会话
+              <CommandShortcut>⌘N</CommandShortcut>
+            </CommandItem>
+            {[
+              { href: "/local/kb", label: "知识库", icon: IconDatabase },
+              { href: "/local/assistants", label: "助手与提示词", icon: IconUsers },
+              { href: "/local/usage", label: "用量统计", icon: IconChartBar },
+              { href: "/local/settings", label: "设置", icon: IconSettings }
+            ].map((item) => (
+              <CommandItem
+                key={item.href}
+                onSelect={() => {
+                  router.push(item.href)
+                  setPaletteOpen(false)
+                }}
+              >
+                <item.icon size={14} className="mr-2" />
+                {item.label}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
+
       <AlertDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => {

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useCallback, useEffect, useState } from "react"
+import { useTheme } from "next-themes"
 import { toast } from "sonner"
 
 /**
@@ -34,6 +35,12 @@ const MODELS = [
   { id: "veyra-swarm", label: "Veyra 蜂群（多智能体）" }
 ]
 
+const THEMES = [
+  { id: "light", label: "亮色" },
+  { id: "dark", label: "暗色" },
+  { id: "system", label: "跟随系统" }
+]
+
 interface HealthInfo {
   status: string
   database: string
@@ -45,9 +52,12 @@ export default function LocalSettingsPage() {
   const [settings, setSettings] = useState<LocalSettings>(DEFAULT_SETTINGS)
   const [testing, setTesting] = useState(false)
   const [health, setHealth] = useState<HealthInfo | null>(null)
+  const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setSettings(loadSettings())
+    setMounted(true)
   }, [])
 
   const persist = useCallback((next: LocalSettings) => {
@@ -90,6 +100,7 @@ export default function LocalSettingsPage() {
             <TabsList className="mb-4">
               <TabsTrigger value="connection">后端连接</TabsTrigger>
               <TabsTrigger value="chat">会话默认</TabsTrigger>
+              <TabsTrigger value="appearance">外观</TabsTrigger>
               <TabsTrigger value="about">关于</TabsTrigger>
             </TabsList>
 
@@ -179,6 +190,37 @@ export default function LocalSettingsPage() {
                   <div>
                     <Button onClick={() => persist(settings)}>保存</Button>
                   </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* 外观 */}
+            <TabsContent value="appearance">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">主题</CardTitle>
+                  <CardDescription className="text-xs">
+                    跟随系统时会随操作系统的深浅色设置自动切换；导航栏底部的按钮也能快速切换。
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {/* 服务端不知道当前主题，挂载前不渲染选中态，避免水合不一致 */}
+                  <Select
+                    value={mounted ? (theme ?? "system") : "system"}
+                    onValueChange={(value) => setTheme(value)}
+                    disabled={!mounted}
+                  >
+                    <SelectTrigger className="w-[200px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {THEMES.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </CardContent>
               </Card>
             </TabsContent>
