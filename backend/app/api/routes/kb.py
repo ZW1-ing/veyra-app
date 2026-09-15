@@ -11,7 +11,7 @@ from ...kb.embedding import EmbeddingProvider
 from ...kb.parsing import DocumentParseError, UnsupportedDocument, extract_text
 from ...kb.service import delete_document, ingest_document, search_knowledge
 from ...schemas.kb import DocumentCreate, DocumentIngestOut, DocumentOut, SearchRequest, SourceOut
-from ..deps import embedding_dep, enforce_rate_limit, get_db, settings_dep
+from ..deps import Principal, embedding_dep, enforce_rate_limit, get_db, settings_dep
 
 router = APIRouter(prefix="/kb", tags=["knowledge-base"], dependencies=[Depends(enforce_rate_limit)])
 
@@ -22,6 +22,7 @@ async def create_document(
     db: Session = Depends(get_db),
     embedding: EmbeddingProvider = Depends(embedding_dep),
     settings: Settings = Depends(settings_dep),
+    principal: Principal = Depends(enforce_rate_limit),
 ) -> DocumentIngestOut:
     document, deduplicated = await ingest_document(
         db,
@@ -32,6 +33,7 @@ async def create_document(
         source_type=payload.source_type,
         chunk_size=payload.chunk_size,
         chunk_overlap=payload.chunk_overlap,
+        owner_id=principal.owner_id,
     )
     return DocumentIngestOut(
         **DocumentOut.model_validate(document).model_dump(),
@@ -47,6 +49,7 @@ async def upload_document(
     db: Session = Depends(get_db),
     embedding: EmbeddingProvider = Depends(embedding_dep),
     settings: Settings = Depends(settings_dep),
+    principal: Principal = Depends(enforce_rate_limit),
 ) -> DocumentIngestOut:
     """上传 txt / markdown / PDF / DOCX，解析成文本后入库。
 
@@ -79,6 +82,7 @@ async def upload_document(
         source_type="file",
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
+        owner_id=principal.owner_id,
     )
     return DocumentIngestOut(
         **DocumentOut.model_validate(document).model_dump(),
@@ -87,17 +91,28 @@ async def upload_document(
 
 
 @router.get("/documents", response_model=list[DocumentOut])
-def list_documents(db: Session = Depends(get_db)) -> list[DocumentRow]:
+def list_documents(
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(enforce_rate_limit),
+) -> list[DocumentRow]:
     rows = db.execute(
-        select(DocumentRow).order_by(DocumentRow.created_at.desc())
+        select(DocumentRow)
+        .where(DocumentRow.owner_id == principal.owner_id)
+        .order_by(DocumentRow.created_at.desc())
     ).scalars().all()
     return list(rows)
 
 
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_document(document_id: str, db: Session = Depends(get_db)) -> None:
+async def remove_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(enforce_rate_limit),
+) -> None:
     """删除文档及其分块。删完这部分知识就不再参与检索。"""
-    removed = await run_in_threadpool(delete_document, db, document_id)
+    removed = await run_in_threadpool(
+        delete_document, db, document_id, principal.owner_id
+    )
     if not removed:
         raise HTTPException(status_code=404, detail="文档不存在")
 
@@ -108,6 +123,14 @@ async def search(
     db: Session = Depends(get_db),
     embedding: EmbeddingProvider = Depends(embedding_dep),
     settings: Settings = Depends(settings_dep),
+    principal: Principal = Depends(enforce_rate_limit),
 ) -> list:
-    sources = await search_knowledge(db, embedding, settings, payload.query, payload.top_k)
+    sources = await search_knowledge(
+        db,
+        embedding,
+        settings,
+        payload.query,
+        payload.top_k,
+        owner_id=principal.owner_id,
+    )
     return sources

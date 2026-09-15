@@ -11,6 +11,7 @@ class UsageBucket(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    cost: float
 
 
 class UsageSummary(BaseModel):
@@ -19,5 +20,7 @@ class UsageSummary(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     days: int
+    total_cost: float
+    pricing_configured: bool
     by_day: list[UsageBucket]
     by_model: list[UsageBucket]

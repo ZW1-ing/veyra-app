@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api.routes import chat, health, kb, sessions, usage
 from .core.config import get_settings
 from .core.logging import setup_logging
+from .core.observability import request_context_middleware
 from .core.ratelimit import build_rate_limiter
 from .db.session import init_db
 from .kb.factory import build_embedding
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
         description="Veyra Agent 引擎的 Python 实现：FastAPI + LangGraph + MySQL",
         lifespan=lifespan,
     )
+    app.middleware("http")(request_context_middleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

@@ -34,6 +34,9 @@ class SessionRow(Base):
     __tablename__ = "sessions"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(
+        String(64), default="anonymous", server_default="anonymous"
+    )
     title: Mapped[str] = mapped_column(String(200), default="新会话")
     mode: Mapped[str] = mapped_column(String(16), default="single")  # single | swarm
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
@@ -45,6 +48,8 @@ class SessionRow(Base):
         order_by="MessageRow.created_at",
         lazy="selectin",
     )
+
+    __table_args__ = (Index("ix_sessions_owner_updated", "owner_id", "updated_at"),)
 
 
 class MessageRow(Base):
@@ -69,6 +74,9 @@ class DocumentRow(Base):
     __tablename__ = "documents"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(
+        String(64), default="anonymous", server_default="anonymous"
+    )
     name: Mapped[str] = mapped_column(String(255))
     source_type: Mapped[str] = mapped_column(String(16), default="text")  # text | file | url
     char_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -92,6 +100,8 @@ class DocumentRow(Base):
         order_by="ChunkRow.chunk_index",
     )
 
+    __table_args__ = (Index("ix_documents_owner_created", "owner_id", "created_at"),)
+
 
 class ChunkRow(Base):
     __tablename__ = "chunks"
@@ -114,9 +124,15 @@ class UsageRow(Base):
     __tablename__ = "usage_records"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(
+        String(64), default="anonymous", server_default="anonymous"
+    )
     session_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    request_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     model: Mapped[str] = mapped_column(String(64), default="")
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cost: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
+
+    __table_args__ = (Index("ix_usage_records_owner_created", "owner_id", "created_at"),)

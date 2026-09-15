@@ -29,10 +29,14 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: mysql+pymysql://root:root@mysql:3306/veyra?charset=utf8mb4
+      API_KEYS: ${API_KEYS:-}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+      REDIS_URL: ${REDIS_URL:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-mock}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-qwen2.5}
+      MODEL_PRICES: ${MODEL_PRICES:-}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-hash}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:

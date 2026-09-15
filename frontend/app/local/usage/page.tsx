@@ -17,6 +17,7 @@ interface UsageBucket {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
+  cost: number
 }
 
 interface UsageSummary {
@@ -25,12 +26,23 @@ interface UsageSummary {
   prompt_tokens: number
   completion_tokens: number
   days: number
+  total_cost: number
+  pricing_configured: boolean
   by_day: UsageBucket[]
   by_model: UsageBucket[]
 }
 
 function formatNumber(value: number): string {
   return value.toLocaleString("zh-CN")
+}
+
+function formatCost(value: number): string {
+  return new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: value < 0.01 ? 4 : 2,
+    maximumFractionDigits: 4
+  }).format(value)
 }
 
 export default function UsagePage() {
@@ -107,12 +119,16 @@ export default function UsagePage() {
           {data && (
             <>
               {/* 汇总 */}
-              <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
                 {[
                   { label: "调用次数", value: formatNumber(data.total_calls) },
                   { label: "总 token", value: formatNumber(data.total_tokens) },
                   { label: "输入 token", value: formatNumber(data.prompt_tokens) },
-                  { label: "输出 token", value: formatNumber(data.completion_tokens) }
+                  { label: "输出 token", value: formatNumber(data.completion_tokens) },
+                  {
+                    label: "估算费用",
+                    value: data.pricing_configured ? formatCost(data.total_cost) : "未配置"
+                  }
                 ].map((item) => (
                   <div key={item.label} className="rounded-md border px-3 py-2.5">
                     <div className="text-muted-foreground text-xs">{item.label}</div>
@@ -145,6 +161,7 @@ export default function UsagePage() {
                         </div>
                         <span className="text-muted-foreground w-32 shrink-0 text-right tabular-nums">
                           {formatNumber(item.total_tokens)} token · {item.calls} 次
+                          {data.pricing_configured ? ` · ${formatCost(item.cost)}` : ""}
                         </span>
                       </div>
                     ))}
@@ -191,6 +208,7 @@ export default function UsagePage() {
                           <th className="px-3 py-2 text-right font-medium">调用</th>
                           <th className="px-3 py-2 text-right font-medium">输入 token</th>
                           <th className="px-3 py-2 text-right font-medium">输出 token</th>
+                          <th className="px-3 py-2 text-right font-medium">估算费用</th>
                           <th className="px-3 py-2 text-right font-medium">合计</th>
                         </tr>
                       </thead>
@@ -204,6 +222,9 @@ export default function UsagePage() {
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums">
                               {formatNumber(item.completion_tokens)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums">
+                              {data.pricing_configured ? formatCost(item.cost) : "—"}
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums">
                               {formatNumber(item.total_tokens)}

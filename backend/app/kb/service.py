@@ -6,6 +6,7 @@
 """
 
 import logging
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from hashlib import sha256
@@ -42,6 +43,7 @@ async def ingest_document(
     source_type: str = "text",
     chunk_size: int | None = None,
     chunk_overlap: int | None = None,
+    owner_id: str = "anonymous",
 ) -> tuple[DocumentRow, bool]:
     """入库文档。返回 (文档, 是否命中重复)。"""
     size = chunk_size or settings.chunk_size
@@ -50,7 +52,7 @@ async def ingest_document(
 
     # 先查重，命中就直接返回，省掉一次向量化调用
     existing = await run_in_threadpool(
-        _find_duplicate, db, content_hash, size, model_label
+        _find_duplicate, db, content_hash, size, model_label, owner_id
     )
     if existing is not None:
         logger.info("文档内容与配置均未变化，复用已有记录 %s（跳过重复入库）", existing.id)
@@ -76,6 +78,7 @@ async def ingest_document(
         model_label,
         dim,
         content_hash,
+        owner_id,
     )
     return document, False
 
@@ -85,6 +88,7 @@ def _find_duplicate(
     content_hash: str,
     chunk_size: int,
     embedding_model: str,
+    owner_id: str,
 ) -> DocumentRow | None:
     """同一份内容 + 同一套处理配置 = 同一条记录。
 
@@ -98,14 +102,15 @@ def _find_duplicate(
             DocumentRow.content_hash == content_hash,
             DocumentRow.chunk_size == chunk_size,
             DocumentRow.embedding_model == embedding_model,
+            DocumentRow.owner_id == owner_id,
         )
     ).scalars().first()
 
 
-def delete_document(db: Session, document_id: str) -> bool:
+def delete_document(db: Session, document_id: str, owner_id: str = "anonymous") -> bool:
     """删除文档及其全部分块。同步操作，由调用方放进线程池。"""
     document = db.get(DocumentRow, document_id)
-    if document is None:
+    if document is None or document.owner_id != owner_id:
         return False
     db.delete(document)  # 关系上配了 cascade，分块会一起删掉
     db.commit()
@@ -123,6 +128,7 @@ def _persist_document(
     embedding_model: str,
     embedding_dim: int,
     content_hash: str,
+    owner_id: str,
 ) -> DocumentRow:
     """同步落库，交给线程池执行。
 
@@ -131,6 +137,7 @@ def _persist_document(
     """
 
     document = DocumentRow(
+        owner_id=owner_id,
         name=name.strip() or "未命名文档",
         source_type=source_type,
         char_count=len(text or ""),
@@ -163,8 +170,10 @@ async def search_knowledge(
     settings: Settings,
     query: str,
     top_k: int | None = None,
+    owner_id: str = "anonymous",
 ) -> list[KnowledgeSource]:
-    candidates = await run_in_threadpool(_load_candidates, db)
+    started = time.perf_counter()
+    candidates = await run_in_threadpool(_load_candidates, db, owner_id)
     if not candidates:
         return []
 
@@ -191,6 +200,13 @@ async def search_knowledge(
         min_coverage=settings.retrieval_min_coverage,
         min_vector_similarity=settings.retrieval_min_vector_similarity,
     )
+    logger.info(
+        "retrieval_completed candidates=%d skipped=%d hits=%d duration_ms=%.1f",
+        len(candidates),
+        skipped,
+        len(ranked),
+        (time.perf_counter() - started) * 1000,
+    )
 
     return [
         KnowledgeSource(
@@ -205,11 +221,12 @@ async def search_knowledge(
     ]
 
 
-def _load_candidates(db: Session) -> list[dict]:
+def _load_candidates(db: Session, owner_id: str = "anonymous") -> list[dict]:
     """读出全部分块参与打分（同步操作，由调用方放进线程池）。"""
     rows: Sequence[tuple[ChunkRow, str]] = db.execute(
         select(ChunkRow, DocumentRow.name)
         .join(DocumentRow, DocumentRow.id == ChunkRow.document_id)
+        .where(DocumentRow.owner_id == owner_id)
     ).all()  # type: ignore[assignment]
     return [
         {

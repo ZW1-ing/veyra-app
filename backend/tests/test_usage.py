@@ -1,5 +1,6 @@
 """用量统计：记下的 token 要能查出来。"""
 
+from app.core.config import ModelPrice, Settings, reset_settings_cache
 from app.db.models import UsageRow
 from app.db.session import get_session_factory
 from app.llm.base import Usage
@@ -54,3 +55,45 @@ def test_usage_rows_have_model_and_tokens():
     assert row is not None
     assert row.model
     assert row.prompt_tokens >= 0
+
+
+def test_estimate_cost_uses_per_million_pricing():
+    settings = Settings(
+        model_prices={
+            "paid-model": ModelPrice(
+                prompt_per_million=1.0,
+                completion_per_million=2.0,
+            )
+        }
+    )
+    cost = chat_service.estimate_cost("paid-model", Usage(1_000_000, 500_000), settings)
+    assert cost == 2.0
+
+
+def test_chat_records_configured_cost(client, app_instance, monkeypatch):
+    monkeypatch.setenv(
+        "MODEL_PRICES",
+        '{"mock-assistant":{"prompt_per_million":10,"completion_per_million":20}}',
+    )
+    reset_settings_cache()
+    try:
+        response = client.post(
+            "/chat",
+            json={"message": "计算成本", "use_knowledge": False},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["cost"] > 0
+        assert body["request_id"] != "-"
+
+        summary = client.get("/usage").json()
+        assert summary["pricing_configured"] is True
+        assert summary["total_cost"] > 0
+
+        with get_session_factory()() as db:
+            latest = db.query(UsageRow).order_by(UsageRow.created_at.desc()).first()
+        assert latest is not None
+        assert latest.request_id == body["request_id"]
+    finally:
+        monkeypatch.delenv("MODEL_PRICES", raising=False)
+        reset_settings_cache()

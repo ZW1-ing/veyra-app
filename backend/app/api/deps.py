@@ -2,6 +2,8 @@
 
 import logging
 from collections.abc import Iterator
+from dataclasses import dataclass
+from hashlib import sha256
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -13,6 +15,18 @@ from ..kb.embedding import EmbeddingProvider
 from ..llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Principal:
+    """当前请求的调用方。owner_id 是可落库的匿名租户标识，不保存原始 Key。"""
+
+    key: str
+    owner_id: str
+
+
+def _owner_id(raw_key: str) -> str:
+    return sha256(raw_key.encode("utf-8")).hexdigest()
 
 
 def get_db() -> Iterator[Session]:
@@ -32,7 +46,9 @@ def embedding_dep(request: Request) -> EmbeddingProvider:
     return request.app.state.embedding
 
 
-def require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> str:
+def require_api_key(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> Principal:
     """校验 API Key。
 
     没有配置任何 key 时直接放行（本地开发），但会打一条警告，
@@ -42,7 +58,7 @@ def require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Ke
     allowed = settings.api_key_set
     if not allowed:
         logger.warning("未配置 API_KEYS，接口处于无鉴权状态，仅限本地开发使用")
-        return "anonymous"
+        return Principal(key="anonymous", owner_id="anonymous")
 
     if not x_api_key or x_api_key not in allowed:
         raise HTTPException(
@@ -50,24 +66,26 @@ def require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Ke
             detail="缺少或无效的 API Key（请在请求头带上 X-API-Key）",
             headers={"WWW-Authenticate": "X-API-Key"},
         )
-    return x_api_key
+    return Principal(key=x_api_key, owner_id=_owner_id(x_api_key))
 
 
 def enforce_rate_limit(
-    request: Request, api_key: str = Depends(require_api_key)
-) -> str:
+    request: Request, principal: Principal = Depends(require_api_key)
+) -> Principal:
     settings = get_settings()
     # 限流器在应用启动时装配（配了 REDIS_URL 就是 Redis 版），这里取现成的
     limiter_impl = getattr(request.app.state, "rate_limiter", None) or build_rate_limiter(
         settings
     )
     try:
-        allowed, retry_after = limiter_impl.check(api_key, settings.rate_limit_per_minute)
+        allowed, retry_after = limiter_impl.check(
+            principal.key, settings.rate_limit_per_minute
+        )
     except Exception as exc:  # noqa: BLE001
         # 限流器故障时放行并告警：可用性优先于限流严格性，
         # 宁可短时间不限流，也不要因为 Redis 抖动让整个服务 5xx
         logger.warning("限流器不可用，本次请求放行：%s", exc)
-        return api_key
+        return principal
 
     if not allowed:
         raise HTTPException(
@@ -75,4 +93,4 @@ def enforce_rate_limit(
             detail=f"请求过于频繁，请 {retry_after} 秒后重试",
             headers={"Retry-After": str(retry_after)},
         )
-    return api_key
+    return principal

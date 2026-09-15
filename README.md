@@ -94,9 +94,10 @@ Agent 编排。数据、密钥与对话记录都留在本机，不依赖任何�
 | 多智能体协作 | Leader 规划 → 依赖感知并发调度 → 汇总，成员失败不影响其他成员 | `backend/app/agent/swarm.py` |
 | 知识库 RAG | 分块入库、名称搜索与排序、混合检索（TF-IDF + 向量）、回答带 `[S1]` 来源编号 | `backend/app/kb/` |
 | 助手与提示词 | 角色设定与可复用指令模板，选中后作为系统提示词下发 | `frontend/app/local/assistants/` |
-| 会话与用量 | 会话、消息、token 用量落 MySQL，Alembic 管理迁移 | `backend/app/db/` |
-| 用量统计 | 按模型与日期聚合 token 用量并可视化 | `backend/app/api/routes/usage.py` |
-| 接口安全 | API Key 鉴权 + 按 key 的滑动窗口限流 | `backend/app/api/deps.py` |
+| 会话与用量 | 会话、消息、token 与成本快照落 MySQL，Alembic 管理迁移 | `backend/app/db/` |
+| 用量统计 | 按模型与日期聚合 token、调用次数与估算费用 | `backend/app/api/routes/usage.py` |
+| 租户隔离 | 每个 API Key 映射独立租户，会话、知识库、用量互不可见 | `backend/app/api/deps.py` |
+| 请求追踪 | 每个请求生成或透传 `X-Request-ID`，记录耗时并关联用量 | `backend/app/core/observability.py` |
 
 ## 系统架构
 
@@ -183,6 +184,13 @@ EMBEDDING_DIM=1024
 ```
 
 > 部署到服务器时记得配置 `API_KEYS`：留空等于不校验，任何能连上端口的人都能用。
+> 配置后每个 Key 会自动成为一个独立租户，会话、知识库和用量互不串数据，数据库只保存 Key 的哈希。
+>
+> 需要估算费用时再配置模型价格，单位是美元 / 百万 token：
+>
+> ```env
+> MODEL_PRICES={"qwen2.5":{"prompt_per_million":0.2,"completion_per_million":0.6}}
+> ```
 
 ### 前端
 
@@ -315,7 +323,7 @@ Leader 输出 JSON 计划后要过三道关：id 唯一、依赖存在、不能�
 ## 测试与 CI
 
 ```powershell
-# 后端：64 项，离线可跑（SQLite + mock 模型）
+# 后端：72 项，离线可跑（SQLite + mock 模型）
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\ruff.exe check app tests scripts
@@ -347,11 +355,11 @@ CI（`.github/workflows/ci.yml`）在每次推送时跑三个 job：
 - [x] 知识库：分块、混合检索、来源引用、幂等入库
 - [x] Agent 工具调用循环与多智能体协作
 - [x] 助手、提示词模板与参数设置
-- [x] 鉴权、限流、迁移与 CI
-- [ ] PDF / DOCX 文档解析
+- [x] 鉴权、多租户隔离、限流、迁移与 CI
 - [x] PDF / DOCX 文档解析（含表格抽取与可读的失败原因）
 - [x] 原生 function calling（自动在原生协议与 JSON 兜底之间切换）
 - [x] 多实例部署的 Redis 限流（配 `REDIS_URL` 即启用）
+- [x] 请求级追踪与模型成本快照
 - [ ] 向量索引：实测全量余弦在 1000 块以内够用、5000 块约 0.9 秒，等规模上来再引入 ANN
 
 ## 许可

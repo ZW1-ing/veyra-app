@@ -2,7 +2,15 @@
 
 from functools import lru_cache
 
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class ModelPrice(BaseModel):
+    """模型价格，单位是美元 / 百万 token。"""
+
+    prompt_per_million: float = Field(default=0.0, ge=0)
+    completion_per_million: float = Field(default=0.0, ge=0)
 
 
 class Settings(BaseSettings):
@@ -38,6 +46,10 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "qwen2.5"
     llm_timeout_seconds: float = 60.0
+    # 可选：按模型记录单价，例如
+    # MODEL_PRICES={"qwen2.5":{"prompt_per_million":0.2,"completion_per_million":0.6}}
+    # 未配置的模型按 0 计费；本地 Ollama 保持不填即可。
+    model_prices: dict[str, ModelPrice] = Field(default_factory=dict)
 
     # 向量化
     embedding_provider: str = "hash"  # hash | openai_compat
@@ -72,6 +84,10 @@ class Settings(BaseSettings):
     # 向量相似度门槛：词法覆盖率不达标但语义足够接近时，同样允许进入排序。
     # 否则「对话记录存在哪里」这类问法会被纯词法门槛挡掉，白瞎了语义嵌入。
     retrieval_min_vector_similarity: float = 0.55
+
+    @property
+    def pricing_configured(self) -> bool:
+        return bool(self.model_prices)
 
 
 @lru_cache

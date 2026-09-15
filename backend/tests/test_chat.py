@@ -41,3 +41,25 @@ def test_chat_continues_existing_session(client):
 
     messages = client.get(f"/sessions/{first['session_id']}/messages").json()
     assert [m["content"] for m in messages] == ["第一条", first["text"], "第二条", second["text"]]
+
+
+def test_first_chat_can_create_the_requested_session_id(client):
+    """前端用首条消息 ID 映射会话时，后端必须原样创建这个 ID。"""
+    session_id = "a" * 32
+
+    first = client.post(
+        "/chat",
+        json={"session_id": session_id, "message": "第一条", "use_knowledge": False},
+    )
+    assert first.status_code == 200
+    assert first.json()["session_id"] == session_id
+
+    second = client.post(
+        "/chat",
+        json={"session_id": session_id, "message": "第二条", "use_knowledge": False},
+    )
+    assert second.status_code == 200
+    assert second.json()["session_id"] == session_id
+
+    messages = client.get(f"/sessions/{session_id}/messages").json()
+    assert len(messages) == 4

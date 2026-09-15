@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test"
-import { existsSync } from "node:fs"
+import { existsSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 /**
@@ -21,6 +22,10 @@ const CHROME = process.env.E2E_CHROME_PATH
 
 const BACKEND_PORT = 8010
 const FRONTEND_PORT = 3100
+// 每次 E2E 都从空数据库开始：旧库可能还是升级前的 schema，create_all 不会补列
+const E2E_DB_PATH = join(tmpdir(), `veyra-e2e-${process.pid}.db`)
+const E2E_DATABASE_URL = `sqlite+pysqlite:///${E2E_DB_PATH.replaceAll("\\", "/")}`
+rmSync(E2E_DB_PATH, { force: true })
 
 // 暴露给测试用例：前端设置页里的后端地址会以请求头形式覆盖环境变量，
 // 所以 E2E 必须显式把 localStorage 里的地址指到测试后端，否则会打到开发者本机的服务
@@ -51,12 +56,14 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         // 用 SQLite 与 mock 模型：E2E 不该依赖 MySQL / Ollama
-        DATABASE_URL: "sqlite+pysqlite:///./e2e.db",
+        DATABASE_URL: E2E_DATABASE_URL,
         LLM_PROVIDER: "mock",
         EMBEDDING_PROVIDER: "hash",
         EMBEDDING_DIM: "128",
         AGENT_MAX_STEPS: "3",
-        RATE_LIMIT_PER_MINUTE: "0"
+        RATE_LIMIT_PER_MINUTE: "0",
+        MODEL_PRICES:
+          '{"mock-assistant":{"prompt_per_million":1,"completion_per_million":2}}'
       }
     },
     {
