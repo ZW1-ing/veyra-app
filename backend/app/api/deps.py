@@ -7,7 +7,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from ..core.config import Settings, get_settings
-from ..core.ratelimit import limiter
+from ..core.ratelimit import build_rate_limiter
 from ..db.session import get_db as _get_db
 from ..kb.embedding import EmbeddingProvider
 from ..llm.base import LLMProvider
@@ -53,9 +53,22 @@ def require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Ke
     return x_api_key
 
 
-def enforce_rate_limit(api_key: str = Depends(require_api_key)) -> str:
+def enforce_rate_limit(
+    request: Request, api_key: str = Depends(require_api_key)
+) -> str:
     settings = get_settings()
-    allowed, retry_after = limiter.check(api_key, settings.rate_limit_per_minute)
+    # 限流器在应用启动时装配（配了 REDIS_URL 就是 Redis 版），这里取现成的
+    limiter_impl = getattr(request.app.state, "rate_limiter", None) or build_rate_limiter(
+        settings
+    )
+    try:
+        allowed, retry_after = limiter_impl.check(api_key, settings.rate_limit_per_minute)
+    except Exception as exc:  # noqa: BLE001
+        # 限流器故障时放行并告警：可用性优先于限流严格性，
+        # 宁可短时间不限流，也不要因为 Redis 抖动让整个服务 5xx
+        logger.warning("限流器不可用，本次请求放行：%s", exc)
+        return api_key
+
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

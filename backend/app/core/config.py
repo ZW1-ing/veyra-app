@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     api_keys: str = ""
     # 每个 key 每分钟允许的请求数；<=0 表示不限流
     rate_limit_per_minute: int = 120
+    # 多实例部署时配 Redis，让限流在实例间共享；留空则用进程内实现
+    redis_url: str = ""
 
     @property
     def api_key_set(self) -> set[str]:

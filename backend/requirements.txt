@@ -2,6 +2,9 @@
 fastapi>=0.115
 uvicorn[standard]>=0.32
 
+# 多实例部署时的共享限流（不配 REDIS_URL 就不需要它）
+redis>=5.0
+
 # 数据层：SQLAlchemy 2.x ORM + MySQL 驱动
 SQLAlchemy>=2.0
 PyMySQL>=1.1
@@ -17,6 +20,9 @@ python-dotenv>=1.0
 pypdf>=5.0
 python-docx>=1.1
 python-multipart>=0.0.9      # FastAPI 处理 multipart 上传
+
+# 向量相似度的批量计算（没装也能跑，会退回纯 Python 实现）
+numpy>=1.26
 
 # Agent 编排
 langgraph>=0.2

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api.routes import chat, health, kb, sessions, usage
 from .core.config import get_settings
 from .core.logging import setup_logging
+from .core.ratelimit import build_rate_limiter
 from .db.session import init_db
 from .kb.factory import build_embedding
 from .llm.factory import build_provider
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.provider = build_provider(settings)
     app.state.embedding = build_embedding(settings)
+    app.state.rate_limiter = build_rate_limiter(settings)
     if settings.auto_create_tables:
         init_db()
     yield
